@@ -1,0 +1,29 @@
+SynapseNet ML Models - Training Summary
+==================================================
+
+Models trained:
+  - failure_predictor
+  - failure_type_predictor
+
+Features used (16):
+  - cpu_util
+  - cpu_temp
+  - gpu_util
+  - gpu_temp
+  - memory_util
+  - network_latency
+  - network_bandwidth
+  - network_util
+  - power_draw
+  - cpu_util_trend
+  - cpu_temp_trend
+  - gpu_util_trend
+  - gpu_temp_trend
+  - network_latency_trend
+  - network_util_trend
+  - power_trend
+
+Usage:
+  from ml_predictor import FailurePredictionML
+  predictor = FailurePredictionML('models/')
+  predictions = predictor.predict(telemetry_data)
