@@ -249,6 +249,25 @@ export class SynapseNetWebSocket {
     this.send({ type: "inject_chaos" });
   }
 
+  public startGame() {
+    console.log("🎮 Starting game mode...");
+    this.send({ type: "start_game" });
+  }
+
+  public sendPlayerAction(actionType: string, targetComponent?: string) {
+    console.log(`🎯 Sending player action: ${actionType}`);
+    this.send({
+      type: "player_action",
+      action_type: actionType,
+      target_component: targetComponent,
+    });
+  }
+
+  public getMLPredictions() {
+    console.log("🤖 Requesting ML predictions...");
+    this.send({ type: "get_ml_predictions" });
+  }
+
   public getConnectionState() {
     return this.connectionState;
   }

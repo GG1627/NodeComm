@@ -109,6 +109,20 @@ async def startup_event():
     simulator = HardwareSimulator()
     simulator._create_realistic_datacenter_topology()
     
+    # Initialize ML predictor for game mode predictions
+    try:
+        from ml_predictor import FailurePredictionML
+        models_dir = "models"  # Path to trained models
+        if os.path.exists(models_dir):
+            simulator.ml_predictor = FailurePredictionML(models_dir)
+            logger.info("✅ ML Predictor loaded successfully!")
+        else:
+            logger.warning(f"⚠️ Models directory '{models_dir}' not found - using fallback predictions")
+            simulator.ml_predictor = None
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to load ML predictor: {e} - using fallback predictions")
+        simulator.ml_predictor = None
+    
     # Initialize KPI scorecard
     scorecard = KPIScorecard()
     
@@ -426,6 +440,100 @@ async def websocket_endpoint(websocket: WebSocket):
                             }),
                             websocket
                         )
+            elif message.get("type") == "start_game":
+                # Start game mode
+                logger.info("🎮 Starting game mode")
+                await manager.send_personal_message(
+                    json.dumps({"type": "game_started", "message": "Game mode activated"}),
+                    websocket
+                )
+            elif message.get("type") == "player_action":
+                # Handle player gesture action
+                action_type = message.get("action_type")
+                target_component = message.get("target_component")
+                logger.info(f"🎯 Player action: {action_type} on {target_component}")
+                
+                # Record action in scorecard
+                if scorecard:
+                    scorecard.record_user_action(action_type, target_component)
+                
+                await manager.send_personal_message(
+                    json.dumps({
+                        "type": "action_result", 
+                        "action": action_type,
+                        "target": target_component,
+                        "message": f"Action {action_type} executed"
+                    }),
+                    websocket
+                )
+            elif message.get("type") == "get_ml_predictions":
+                # Get ML predictions for game mode
+                if simulator:
+                    telemetry = simulator.get_telemetry()
+                    
+                    # Use the ML predictor if available
+                    predictions = []
+                    if hasattr(simulator, 'ml_predictor') and simulator.ml_predictor:
+                        try:
+                            ml_predictions = simulator.ml_predictor.predict_failures(telemetry)
+                            predictions = [
+                                {
+                                    "message": f"⚠️ {pred.failure_type} failure predicted",
+                                    "confidence": pred.confidence,
+                                    "recommended_action": pred.recommended_action,
+                                    "time_to_failure": pred.seconds_until_failure
+                                }
+                                for pred in ml_predictions
+                            ]
+                        except Exception as e:
+                            logger.warning(f"ML prediction error: {e}")
+                            # Fallback to game-specific predictions
+                            predictions = [
+                                {
+                                    "message": "🔮 System analysis suggests thermal issues incoming...",
+                                    "confidence": 0.8,
+                                    "recommended_action": "Use HEAL gesture for thermal attacks",
+                                    "time_to_failure": 5.0
+                                }
+                            ]
+                    else:
+                        # Enhanced fallback predictions for game mode based on system state
+                        import random
+                        attack_hints = [
+                            {
+                                "message": "🔮 Thermal sensors detecting overheating patterns...",
+                                "confidence": 0.82,
+                                "recommended_action": "Use HEAL gesture for thermal attacks", 
+                                "time_to_failure": 4.0
+                            },
+                            {
+                                "message": "🔮 Network traffic analysis shows bandwidth spike incoming...",
+                                "confidence": 0.78,
+                                "recommended_action": "Use REROUTE gesture for bandwidth attacks", 
+                                "time_to_failure": 3.5
+                            },
+                            {
+                                "message": "🔮 Latency patterns suggest connection issues ahead...",
+                                "confidence": 0.75,
+                                "recommended_action": "Use CUT gesture for latency attacks", 
+                                "time_to_failure": 2.8
+                            },
+                            {
+                                "message": "🔮 Error rate monitoring indicates system instability...",
+                                "confidence": 0.80,
+                                "recommended_action": "Use SHIELD gesture for error attacks", 
+                                "time_to_failure": 3.2
+                            }
+                        ]
+                        predictions = [random.choice(attack_hints)]
+                    
+                    await manager.send_personal_message(
+                        json.dumps({
+                            "type": "ml_predictions",
+                            "predictions": predictions
+                        }),
+                        websocket
+                    )
             
     except WebSocketDisconnect:
         manager.disconnect(websocket)
