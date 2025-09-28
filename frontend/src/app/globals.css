@@ -24,3 +24,55 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Custom Dark Theme Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(39, 39, 42, 0.3); /* zinc-800 with transparency */
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.6); /* zinc-600 with transparency */
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.8); /* zinc-500 with transparency */
+}
+
+/* Firefox scrollbar styling */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(82, 82, 91, 0.6) rgba(39, 39, 42, 0.3);
+}
+
+/* Flash then fade animation for chaos injection */
+@keyframes flash-and-fade {
+  0%,
+  20%,
+  40%,
+  60% {
+    opacity: 1;
+  }
+  10%,
+  30%,
+  50%,
+  70% {
+    opacity: 0.3;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-flash-fade {
+  animation: flash-and-fade 2.5s ease-out forwards;
+}

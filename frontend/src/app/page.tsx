@@ -7,6 +7,7 @@ import {
   HardwareComponent,
   Link,
   Scorecard,
+  TelemetryFrame,
 } from "../lib/websocket";
 
 export default function Home() {
@@ -14,6 +15,9 @@ export default function Home() {
   const [connectionState, setConnectionState] =
     useState<string>("disconnected");
   const [simulationRunning, setSimulationRunning] = useState(false);
+  const [chaosInjected, setChaosInjected] = useState(false);
+  const [isHealing, setIsHealing] = useState(false);
+  const [currentMode, setCurrentMode] = useState<"learn" | "game">("learn");
 
   useEffect(() => {
     // Set up WebSocket listeners
@@ -24,10 +28,36 @@ export default function Home() {
     synapseNetWS.on("system_update", (data: SystemUpdate) => {
       setSystemData(data);
       setSimulationRunning(data.simulation_running);
+
+      // Detect if system is healing (has failed/degraded components but not all failed)
+      const hasFailedComponents = data.components.some(
+        (comp) => comp.status === "failed"
+      );
+      const hasDegradedComponents = data.components.some(
+        (comp) => comp.status === "degraded"
+      );
+      const hasHealthyComponents = data.components.some(
+        (comp) => comp.status === "healthy"
+      );
+
+      // System is healing if it has some failed/degraded components but also some healthy ones
+      const healing =
+        (hasFailedComponents || hasDegradedComponents) && hasHealthyComponents;
+      setIsHealing(healing);
     });
 
     synapseNetWS.on("simulation_started", () => {
       setSimulationRunning(true);
+    });
+
+    synapseNetWS.on("simulation_stopped", () => {
+      setSimulationRunning(false);
+    });
+
+    synapseNetWS.on("chaos_injected", () => {
+      setChaosInjected(true);
+      // Reset after 3 seconds
+      setTimeout(() => setChaosInjected(false), 3000);
     });
 
     // Cleanup on unmount
@@ -41,7 +71,13 @@ export default function Home() {
   };
 
   const handleInjectChaos = () => {
+    console.log("🔥 Injecting chaos...");
     synapseNetWS.injectChaos();
+  };
+
+  const handleStopSimulation = () => {
+    console.log("⏹️ Stopping simulation...");
+    synapseNetWS.stopSimulation();
   };
 
   // Get live data or use defaults
@@ -49,10 +85,48 @@ export default function Home() {
   const isOnline = connectionState === "connected";
   const components = systemData?.components ?? [];
   const links = systemData?.links ?? [];
+
+  // Dynamic color functions for metrics
+  const getStatusColor = (
+    value: number,
+    thresholds = { good: 80, warning: 50 }
+  ) => {
+    if (value >= thresholds.good) return "bg-emerald-400";
+    if (value >= thresholds.warning) return "bg-yellow-400";
+    return "bg-red-400";
+  };
+
+  const getTextColor = (
+    value: number,
+    thresholds = { good: 80, warning: 50 }
+  ) => {
+    if (value >= thresholds.good) return "text-emerald-400";
+    if (value >= thresholds.warning) return "text-yellow-400";
+    return "text-red-400";
+  };
+
+  // Reverse color functions for metrics where HIGH = BAD
+  const getBadStatusColor = (
+    value: number,
+    thresholds = { bad: 80, warning: 50 }
+  ) => {
+    if (value >= thresholds.bad) return "bg-red-400";
+    if (value >= thresholds.warning) return "bg-yellow-400";
+    return "bg-emerald-400";
+  };
+
+  const getBadTextColor = (
+    value: number,
+    thresholds = { bad: 80, warning: 50 }
+  ) => {
+    if (value >= thresholds.bad) return "text-red-400";
+    if (value >= thresholds.warning) return "text-yellow-400";
+    return "text-emerald-400";
+  };
   const scorecard = systemData?.scorecard;
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
+    <div className="h-screen overflow-hidden bg-zinc-950 text-white">
       {/* Header */}
       <header className="bg-zinc-900/50 backdrop-blur-sm border-b border-zinc-800/50 p-6">
         <div className="flex items-center justify-between">
@@ -93,55 +167,121 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Mode Selector */}
+            <div className="flex items-center space-x-4">
+              <div className="flex bg-zinc-800/50 rounded-lg p-1">
+                <button
+                  onClick={() => setCurrentMode("learn")}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                    currentMode === "learn"
+                      ? "bg-blue-600 text-white"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  🎓 Learn Mode
+                </button>
+                <button
+                  onClick={() => setCurrentMode("game")}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                    currentMode === "game"
+                      ? "bg-blue-600 text-white"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  🎮 Game Mode
+                </button>
+              </div>
+            </div>
+
             {/* Control Buttons */}
             <div className="flex space-x-2">
-              <button
-                onClick={handleStartSimulation}
-                disabled={!isOnline || simulationRunning}
-                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-xs rounded-md transition-colors"
-              >
-                Start Sim
-              </button>
+              {!simulationRunning ? (
+                <button
+                  onClick={handleStartSimulation}
+                  disabled={!isOnline}
+                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-xs rounded-md transition-colors cursor-pointer"
+                >
+                  Start Sim
+                </button>
+              ) : (
+                <button
+                  onClick={handleStopSimulation}
+                  disabled={!isOnline}
+                  className="px-3 py-1 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-xs rounded-md transition-colors cursor-pointer"
+                >
+                  Stop Sim
+                </button>
+              )}
               <button
                 onClick={handleInjectChaos}
                 disabled={!isOnline || !simulationRunning}
-                className="px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-xs rounded-md transition-colors"
+                className={`px-3 py-1 text-white text-xs rounded-md transition-colors cursor-pointer ${
+                  chaosInjected
+                    ? "bg-orange-600 hover:bg-orange-700"
+                    : currentMode === "learn"
+                    ? "bg-red-600 hover:bg-red-700 animate-pulse"
+                    : "bg-red-600 hover:bg-red-700"
+                } disabled:bg-gray-600 disabled:cursor-not-allowed`}
+                title={
+                  currentMode === "learn"
+                    ? "Click to simulate system failures and watch AI self-healing in action!"
+                    : "Inject chaos into the system"
+                }
               >
-                Inject Chaos
+                {chaosInjected
+                  ? "Chaos Active!"
+                  : currentMode === "learn"
+                  ? "🔥 Try Chaos!"
+                  : "Inject Chaos"}
               </button>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="flex h-screen">
+      <div className="flex h-screen overflow-hidden">
         {/* Left Sidebar - Connectivity Health */}
-        <div className="w-80 bg-zinc-900/30 backdrop-blur-sm border-r border-zinc-800/30 p-6 overflow-y-auto">
-          <h2 className="text-lg font-light mb-6 text-zinc-200 tracking-wide">
+        <div className="w-72 lg:w-80 xl:w-80 bg-zinc-900/30 backdrop-blur-sm border-r border-zinc-800/30 p-4 2xl:p-4 overflow-y-auto custom-scrollbar">
+          <h2 className="text-lg font-light mb-3 2xl:mb-4 text-zinc-200 tracking-wide">
             Connectivity Health
           </h2>
 
           {/* PCIe Retimer Status */}
-          <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-5 mb-4 border border-zinc-700/30">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-white">PCIe Retimer</h3>
-              <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
+          <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 2xl:p-4 mb-2 2xl:mb-3 border border-zinc-700/30">
+            <div className="flex items-center justify-between mb-0.5">
+              <h3 className="text-sm 2xl:text-base font-medium text-white">
+                PCIe Retimer
+              </h3>
+              <div
+                className={`w-2 h-2 rounded-full ${getStatusColor(
+                  scorecard?.signal_integrity_score ?? 87
+                )}`}
+              ></div>
             </div>
-            <div className="text-xs text-zinc-500 mb-2">
+            <div className="text-xs text-zinc-500 mb-0.5">
               Aries Signal Processor
             </div>
-            <div className="space-y-3 text-sm">
+            <div className="space-y-0.5 text-sm 2xl:text-sm">
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Signal Quality</span>
-                <span className="text-emerald-400 font-medium">
+                <span
+                  className={`font-medium ${getTextColor(
+                    scorecard?.signal_integrity_score ?? 87
+                  )}`}
+                >
                   {scorecard?.signal_integrity_score
                     ? `${Math.round(scorecard.signal_integrity_score)}%`
-                    : "Excellent"}
+                    : "87%"}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Compensation</span>
-                <span className="text-white font-medium">
+                <span
+                  className={`font-medium ${getBadTextColor(
+                    scorecard?.retimer_compensation_level ?? 15,
+                    { bad: 50, warning: 30 }
+                  )}`}
+                >
                   {scorecard?.retimer_compensation_level
                     ? `${Math.round(
                         scorecard.retimer_compensation_level
@@ -155,9 +295,14 @@ export default function Home() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Error Rate</span>
-                <span className="text-emerald-400 font-medium">
-                  {systemData?.telemetry
-                    ? `${(Math.random() * 0.05).toFixed(3)}%`
+                <span
+                  className={`font-medium ${getBadTextColor(
+                    systemData?.telemetry?.avg_error_rate ?? 0.01,
+                    { bad: 5, warning: 1 }
+                  )}`}
+                >
+                  {systemData?.telemetry?.avg_error_rate
+                    ? `${systemData.telemetry.avg_error_rate.toFixed(3)}%`
                     : "0.01%"}
                 </span>
               </div>
@@ -165,18 +310,29 @@ export default function Home() {
           </div>
 
           {/* Smart Cable Module */}
-          <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-5 mb-4 border border-zinc-700/30">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-white">Smart Cable Module</h3>
-              <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
+          <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 2xl:p-4 mb-2 2xl:mb-3 border border-zinc-700/30">
+            <div className="flex items-center justify-between mb-0.5">
+              <h3 className="text-sm 2xl:text-base font-medium text-white">
+                Smart Cable Module
+              </h3>
+              <div
+                className={`w-2 h-2 rounded-full ${getStatusColor(
+                  scorecard?.smart_cable_health ?? 95
+                )}`}
+              ></div>
             </div>
-            <div className="text-xs text-zinc-500 mb-2">
+            <div className="text-xs text-zinc-500 mb-0.5">
               Taurus Intelligent Cable
             </div>
-            <div className="space-y-3 text-sm">
+            <div className="space-y-0.5 text-sm 2xl:text-sm">
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Bandwidth Usage</span>
-                <span className="text-white font-medium">
+                <span
+                  className={`font-medium ${getBadTextColor(
+                    systemData?.telemetry?.total_utilization ?? 15,
+                    { bad: 90, warning: 70 }
+                  )}`}
+                >
                   {systemData?.telemetry?.total_bandwidth
                     ? `${Math.round(systemData.telemetry.total_bandwidth)} GB/s`
                     : "85 GB/s"}
@@ -184,40 +340,95 @@ export default function Home() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Cable Health</span>
-                <span className="text-emerald-400 font-medium">
+                <span
+                  className={`font-medium ${getTextColor(
+                    scorecard?.smart_cable_health ?? 95
+                  )}`}
+                >
                   {scorecard?.smart_cable_health
                     ? `${Math.round(scorecard.smart_cable_health)}%`
-                    : "Excellent"}
+                    : "95%"}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Thermal Status</span>
-                <span className="text-white font-medium">Normal</span>
+                <span
+                  className={`font-medium ${getBadTextColor(
+                    systemData?.telemetry?.avg_temperature ?? 25,
+                    { bad: 80, warning: 60 }
+                  )}`}
+                >
+                  {systemData?.telemetry?.avg_temperature &&
+                  systemData.telemetry.avg_temperature > 80
+                    ? "Hot"
+                    : systemData?.telemetry?.avg_temperature &&
+                      systemData.telemetry.avg_temperature > 60
+                    ? "Warm"
+                    : "Normal"}
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Link Monitoring</span>
-                <span className="text-emerald-400 font-medium">Active</span>
+                <span
+                  className={`font-medium ${getTextColor(
+                    scorecard?.signal_integrity_score ?? 87
+                  )}`}
+                >
+                  {scorecard?.signal_integrity_score &&
+                  scorecard.signal_integrity_score < 50
+                    ? "Degraded"
+                    : "Active"}
+                </span>
               </div>
             </div>
           </div>
 
           {/* CXL Memory Controller */}
-          <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-5 mb-4 border border-zinc-700/30">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-white">CXL Memory Controller</h3>
-              <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
+          <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 2xl:p-4 mb-2 2xl:mb-3 border border-zinc-700/30">
+            <div className="flex items-center justify-between mb-0.5">
+              <h3 className="text-sm 2xl:text-base font-medium text-white">
+                CXL Memory Controller
+              </h3>
+              <div
+                className={`w-2 h-2 rounded-full ${getStatusColor(
+                  scorecard?.cxl_channel_utilization
+                    ? 100 - scorecard.cxl_channel_utilization
+                    : 55,
+                  { good: 70, warning: 40 }
+                )}`}
+              ></div>
             </div>
-            <div className="text-xs text-zinc-500 mb-2">
+            <div className="text-xs text-zinc-500 mb-0.5">
               Leo Memory Platform
             </div>
-            <div className="space-y-3 text-sm">
+            <div className="space-y-0.5 text-sm 2xl:text-sm">
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Memory Pools</span>
-                <span className="text-white font-medium">3 Active</span>
+                <span
+                  className={`font-medium ${
+                    components.filter(
+                      (c) =>
+                        c.component_type === "memory" && c.status === "healthy"
+                    ).length < 2
+                      ? "text-red-400"
+                      : "text-white"
+                  }`}
+                >
+                  {
+                    components.filter((c) => c.component_type === "memory")
+                      .length
+                  }{" "}
+                  Active
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Channel Usage</span>
-                <span className="text-white font-medium">
+                <span
+                  className={`font-medium ${getBadTextColor(
+                    scorecard?.cxl_channel_utilization ?? 45,
+                    { bad: 90, warning: 70 }
+                  )}`}
+                >
                   {scorecard?.cxl_channel_utilization
                     ? `${Math.round(scorecard.cxl_channel_utilization)}%`
                     : "45%"}
@@ -225,45 +436,139 @@ export default function Home() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Pool Access</span>
-                <span className="text-emerald-400 font-medium">
-                  64GB Available
+                <span
+                  className={`font-medium ${getTextColor(
+                    scorecard?.signal_integrity_score ?? 87
+                  )}`}
+                >
+                  {scorecard?.signal_integrity_score &&
+                  scorecard.signal_integrity_score < 50
+                    ? "Limited"
+                    : "64GB Available"}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">CXL Protocol</span>
-                <span className="text-emerald-400 font-medium">3.0 Active</span>
+                <span
+                  className={`font-medium ${getTextColor(
+                    scorecard?.signal_integrity_score ?? 87
+                  )}`}
+                >
+                  {scorecard?.signal_integrity_score &&
+                  scorecard.signal_integrity_score < 50
+                    ? "Degraded"
+                    : "3.0 Active"}
+                </span>
               </div>
             </div>
           </div>
 
           {/* Connectivity Fabric */}
-          <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-5 border border-zinc-700/30">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-white">Connectivity Fabric</h3>
-              <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
+          <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 2xl:p-4 border border-zinc-700/30">
+            <div className="flex items-center justify-between mb-0.5">
+              <h3 className="text-sm 2xl:text-base font-medium text-white">
+                Connectivity Fabric
+              </h3>
+              <div
+                className={`w-2 h-2 rounded-full ${getStatusColor(resilience)}`}
+              ></div>
             </div>
-            <div className="text-xs text-zinc-500 mb-2">
+            <div className="text-xs text-zinc-500 mb-0.5">
               Overall System Health
             </div>
-            <div className="space-y-3 text-sm">
+            <div className="space-y-0.5 text-sm 2xl:text-sm">
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Signal Integrity</span>
-                <span className="text-emerald-400 font-medium">95%</span>
+                <span
+                  className={`font-medium ${getTextColor(
+                    scorecard?.signal_integrity_score ?? 87
+                  )}`}
+                >
+                  {scorecard?.signal_integrity_score
+                    ? `${Math.round(scorecard.signal_integrity_score)}%`
+                    : "87%"}
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Traffic Flow</span>
-                <span className="text-white font-medium">Optimal</span>
+                <span
+                  className={`font-medium ${getBadTextColor(
+                    systemData?.telemetry?.total_utilization ?? 15,
+                    { bad: 85, warning: 65 }
+                  )}`}
+                >
+                  {systemData?.telemetry?.total_utilization &&
+                  systemData.telemetry.total_utilization > 85
+                    ? "Congested"
+                    : systemData?.telemetry?.total_utilization &&
+                      systemData.telemetry.total_utilization > 65
+                    ? "Busy"
+                    : "Optimal"}
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-zinc-400">Link Redundancy</span>
-                <span className="text-emerald-400 font-medium">Available</span>
+                <span
+                  className={`font-medium ${getTextColor(
+                    (links.filter((l) => l.status === "healthy").length /
+                      Math.max(links.length, 1)) *
+                      100,
+                    { good: 80, warning: 60 }
+                  )}`}
+                >
+                  {links.filter((l) => l.status === "healthy").length <
+                  links.length * 0.8
+                    ? "Limited"
+                    : "Available"}
+                </span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Main Content Area */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Features Section - Only in Learn Mode */}
+          {currentMode === "learn" && (
+            <div className="bg-zinc-900/20 backdrop-blur-sm border-b border-zinc-800/30 p-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <div className="text-lg">🔥</div>
+                    <div className="text-white font-medium text-xs">
+                      Inject Chaos
+                    </div>
+                  </div>
+                  <div className="text-zinc-400 text-xs">
+                    Simulate system failures and watch AI self-healing
+                  </div>
+                </div>
+                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <div className="text-lg">📊</div>
+                    <div className="text-white font-medium text-xs">
+                      Monitor Metrics
+                    </div>
+                  </div>
+                  <div className="text-zinc-400 text-xs">
+                    Observe real-time performance in the sidebar
+                  </div>
+                </div>
+                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <div className="text-lg">🤖</div>
+                    <div className="text-white font-medium text-xs">
+                      AI Healing
+                    </div>
+                  </div>
+                  <div className="text-zinc-400 text-xs">
+                    Watch intelligent system recovery in action
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Node Visualization Area */}
           <div className="flex-1 bg-zinc-950 relative overflow-hidden">
             <div className="absolute top-4 left-4 bg-zinc-900/80 backdrop-blur-sm rounded-lg px-3 py-1 border border-zinc-700/50">
@@ -271,6 +576,37 @@ export default function Home() {
                 Live Data Center Topology
               </span>
             </div>
+
+            {/* Self Healing with AI Indicator - Moved here for better placement */}
+            {isHealing && (
+              <div className="absolute top-4 right-4 bg-zinc-900/80 backdrop-blur-sm rounded-lg px-4 py-2 border border-blue-500/50">
+                <div className="flex items-center space-x-3">
+                  <div className="w-3 h-3 rounded-full bg-blue-400 animate-pulse"></div>
+                  <span className="text-blue-400 font-semibold animate-pulse text-sm">
+                    🤖 AI Self Healing Active
+                  </span>
+                </div>
+                <div className="text-xs text-blue-300 mt-1">
+                  System automatically recovering from failures
+                </div>
+              </div>
+            )}
+
+            {/* Chaos Injection Visual Effects */}
+            {chaosInjected && (
+              <div className="absolute inset-0 pointer-events-none">
+                {/* Red flash overlay with flash and fade animation */}
+                <div className="absolute inset-0 bg-red-500/20 animate-flash-fade"></div>
+                {/* Warning text */}
+                <div className="absolute top-1/4 left-1/2 transform -translate-x-1/2">
+                  <div className="bg-red-600/90 backdrop-blur-sm rounded-lg px-4 py-2 border border-red-500 animate-flash-fade">
+                    <span className="text-white font-bold text-lg">
+                      ⚠️ CHAOS INJECTED! ⚠️
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <svg
               className="absolute inset-0 w-full h-full"
@@ -438,16 +774,53 @@ export default function Home() {
                     cx="150"
                     cy="100"
                     r="18"
-                    fill="rgb(52 211 153)"
+                    fill={
+                      components.find((c) => c.id === "cpu1")?.status ===
+                      "failed"
+                        ? "rgb(239 68 68)"
+                        : components.find((c) => c.id === "cpu1")?.status ===
+                          "degraded"
+                        ? "rgb(245 158 11)"
+                        : "rgb(52 211 153)"
+                    }
                     className="drop-shadow-lg"
                   />
                   <circle
                     cx="150"
                     cy="100"
                     r="14"
-                    fill="rgb(6 78 59)"
+                    fill={
+                      components.find((c) => c.id === "cpu1")?.status ===
+                      "failed"
+                        ? "rgb(127 29 29)"
+                        : components.find((c) => c.id === "cpu1")?.status ===
+                          "degraded"
+                        ? "rgb(146 64 14)"
+                        : "rgb(6 78 59)"
+                    }
                     className="opacity-80"
                   />
+                  {/* Status indicator */}
+                  {components.find((c) => c.id === "cpu1")?.status ===
+                    "failed" && (
+                    <circle
+                      cx="165"
+                      cy="85"
+                      r="4"
+                      fill="rgb(239 68 68)"
+                      className="animate-pulse"
+                    />
+                  )}
+                  {components.find((c) => c.id === "cpu1")?.status ===
+                    "degraded" && (
+                    <circle
+                      cx="165"
+                      cy="85"
+                      r="4"
+                      fill="rgb(245 158 11)"
+                      className="animate-pulse"
+                    />
+                  )}
                   <text
                     x="150"
                     y="80"
@@ -462,7 +835,7 @@ export default function Home() {
                     x="70"
                     y="20"
                     width="160"
-                    height="100"
+                    height="120"
                     className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
                   >
                     <div className="bg-zinc-800/95 backdrop-blur-sm rounded-lg p-3 border border-zinc-600/50 text-xs text-white shadow-xl">
@@ -472,6 +845,12 @@ export default function Home() {
                       <div className="text-zinc-300">56 cores, 2.0-3.8 GHz</div>
                       <div className="text-zinc-400">350W TDP, PCIe 5.0</div>
                       <div className="text-zinc-400">Aries Retimer Enabled</div>
+                      {currentMode === "learn" && (
+                        <div className="mt-2 pt-2 border-t border-zinc-600/50 text-blue-300">
+                          💡 Try chaos injection to see how this CPU responds to
+                          failures!
+                        </div>
+                      )}
                     </div>
                   </foreignObject>
                 </g>
@@ -524,16 +903,53 @@ export default function Home() {
                     cx="550"
                     cy="100"
                     r="18"
-                    fill="rgb(52 211 153)"
+                    fill={
+                      components.find((c) => c.id === "cpu2")?.status ===
+                      "failed"
+                        ? "rgb(239 68 68)"
+                        : components.find((c) => c.id === "cpu2")?.status ===
+                          "degraded"
+                        ? "rgb(245 158 11)"
+                        : "rgb(52 211 153)"
+                    }
                     className="drop-shadow-lg"
                   />
                   <circle
                     cx="550"
                     cy="100"
                     r="14"
-                    fill="rgb(6 78 59)"
+                    fill={
+                      components.find((c) => c.id === "cpu2")?.status ===
+                      "failed"
+                        ? "rgb(127 29 29)"
+                        : components.find((c) => c.id === "cpu2")?.status ===
+                          "degraded"
+                        ? "rgb(146 64 14)"
+                        : "rgb(6 78 59)"
+                    }
                     className="opacity-80"
                   />
+                  {/* Status indicator */}
+                  {components.find((c) => c.id === "cpu2")?.status ===
+                    "failed" && (
+                    <circle
+                      cx="565"
+                      cy="85"
+                      r="4"
+                      fill="rgb(239 68 68)"
+                      className="animate-pulse"
+                    />
+                  )}
+                  {components.find((c) => c.id === "cpu2")?.status ===
+                    "degraded" && (
+                    <circle
+                      cx="565"
+                      cy="85"
+                      r="4"
+                      fill="rgb(245 158 11)"
+                      className="animate-pulse"
+                    />
+                  )}
                   <text
                     x="550"
                     y="80"
@@ -718,7 +1134,7 @@ export default function Home() {
                   </text>
                   <text
                     x="400"
-                    y="275"
+                    y="290"
                     textAnchor="middle"
                     className="text-xs fill-zinc-400 font-light"
                   >
@@ -750,16 +1166,53 @@ export default function Home() {
                     cx="150"
                     cy="350"
                     r="18"
-                    fill="rgb(168 85 247)"
+                    fill={
+                      components.find((c) => c.id === "gpu1")?.status ===
+                      "failed"
+                        ? "rgb(239 68 68)"
+                        : components.find((c) => c.id === "gpu1")?.status ===
+                          "degraded"
+                        ? "rgb(245 158 11)"
+                        : "rgb(168 85 247)"
+                    }
                     className="drop-shadow-lg"
                   />
                   <circle
                     cx="150"
                     cy="350"
                     r="14"
-                    fill="rgb(126 34 206)"
+                    fill={
+                      components.find((c) => c.id === "gpu1")?.status ===
+                      "failed"
+                        ? "rgb(127 29 29)"
+                        : components.find((c) => c.id === "gpu1")?.status ===
+                          "degraded"
+                        ? "rgb(146 64 14)"
+                        : "rgb(126 34 206)"
+                    }
                     className="opacity-80"
                   />
+                  {/* Status indicator */}
+                  {components.find((c) => c.id === "gpu1")?.status ===
+                    "failed" && (
+                    <circle
+                      cx="165"
+                      cy="335"
+                      r="4"
+                      fill="rgb(239 68 68)"
+                      className="animate-pulse"
+                    />
+                  )}
+                  {components.find((c) => c.id === "gpu1")?.status ===
+                    "degraded" && (
+                    <circle
+                      cx="165"
+                      cy="335"
+                      r="4"
+                      fill="rgb(245 158 11)"
+                      className="animate-pulse"
+                    />
+                  )}
                   <text
                     x="150"
                     y="330"
@@ -1191,199 +1644,204 @@ export default function Home() {
               </g>
             </svg>
 
-            {/* ML Predictions Overlay */}
-            <div className="absolute top-6 right-6 bg-zinc-900/60 backdrop-blur-sm rounded-2xl p-5 border border-zinc-700/30">
-              <h3 className="text-zinc-200 font-medium mb-3 flex items-center">
-                <span className="mr-2">🤖</span>
-                ML Predictions
-              </h3>
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-amber-400 rounded-full"></div>
-                  <span className="text-white">
-                    PCIe retimer compensation increasing
-                  </span>
-                </div>
-                <div className="text-xs text-zinc-400 ml-5">
-                  Confidence: 87% • Signal degradation detected
-                </div>
-                <div className="flex items-center space-x-3 mt-2">
-                  <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
-                  <span className="text-white">
-                    CXL memory pool rebalancing needed
-                  </span>
-                </div>
-                <div className="text-xs text-zinc-400 ml-5">
-                  Confidence: 92% • Optimize traffic distribution
-                </div>
+            {/* Node Status Panel - Shows current active nodes and failures */}
+            <div className="absolute bottom-33 left-4 bg-zinc-900/90 backdrop-blur-sm rounded-lg px-4 py-3 border border-zinc-700/50 z-10">
+              <div className="text-xs font-medium text-zinc-200 mb-2">
+                Node Status
+              </div>
+              <div className="space-y-1">
+                {components
+                  .filter(
+                    (comp) =>
+                      comp.status === "failed" || comp.status === "degraded"
+                  )
+                  .map((comp) => (
+                    <div key={comp.id} className="flex items-center space-x-2">
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          comp.status === "failed"
+                            ? "bg-red-400"
+                            : "bg-yellow-400"
+                        } animate-pulse`}
+                      ></div>
+                      <span className="text-xs text-zinc-300">
+                        {comp.id}: {comp.status}
+                      </span>
+                    </div>
+                  ))}
+                {components.filter(
+                  (comp) =>
+                    comp.status === "failed" || comp.status === "degraded"
+                ).length === 0 && (
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 rounded-full bg-green-400"></div>
+                    <span className="text-xs text-zinc-300">
+                      All systems healthy
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Data Center Info */}
-            <div className="absolute bottom-6 right-6 bg-zinc-900/60 backdrop-blur-sm rounded-xl p-4 border border-zinc-700/30">
-              <h3 className="text-sm font-medium text-zinc-200 mb-2">
-                Data Center Topology
-              </h3>
-              <div className="text-xs space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-zinc-400">CPU Clusters:</span>
-                  <span className="text-emerald-400">2 Active</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-400">GPU Pool:</span>
-                  <span className="text-white">4 H100s</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-zinc-400">Fabric Health:</span>
-                  <span className="text-emerald-400">Optimal</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Network Stats Overlay */}
-          <div className="bg-zinc-900/50 backdrop-blur-sm border-t border-zinc-800/30 p-4">
-            <div className="flex justify-between items-center">
-              <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-4 border border-zinc-700/30">
-                <h3 className="text-sm font-medium text-zinc-200 mb-2">
-                  Connectivity Health
-                </h3>
-                <div className="text-xs space-y-1 flex space-x-6">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-400">PCIe Links:</span>
-                    <span className="text-emerald-400 ml-2">
-                      {systemData
-                        ? `${systemData.components.length}/${systemData.components.length} Active`
-                        : "16/16 Active"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-400">CXL Bandwidth:</span>
-                    <span className="text-white ml-2">
-                      {systemData?.telemetry?.total_bandwidth
-                        ? `${Math.round(
-                            systemData.telemetry.total_bandwidth
-                          )} GB/s`
-                        : "51.2 GB/s"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-400">Signal Quality:</span>
-                    <span className="text-emerald-400 ml-2">
-                      {scorecard?.signal_integrity_score
-                        ? `${Math.round(scorecard.signal_integrity_score)}%`
-                        : "Excellent"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-4 border border-zinc-700/30">
-                <h3 className="text-zinc-200 font-medium mb-2 flex items-center">
+            {/* ML Predictions Overlay - Only show in Game Mode */}
+            {currentMode === "game" && (
+              <div className="absolute top-6 right-6 bg-zinc-900/60 backdrop-blur-sm rounded-2xl p-5 border border-zinc-700/30">
+                <h3 className="text-zinc-200 font-medium mb-3 flex items-center">
                   <span className="mr-2">🤖</span>
-                  System Status
+                  ML Predictions
                 </h3>
-                <div className="space-y-2 text-sm">
+                <div className="space-y-3 text-sm">
                   <div className="flex items-center space-x-3">
-                    <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
-                    <span className="text-white text-xs">
-                      All systems operational
+                    <div className="w-2 h-2 bg-amber-400 rounded-full"></div>
+                    <span className="text-white">
+                      PCIe retimer compensation increasing
                     </span>
                   </div>
-                  <div className="flex items-center space-x-3">
+                  <div className="text-xs text-zinc-400 ml-5">
+                    Confidence: 87% • Signal degradation detected
+                  </div>
+                  <div className="flex items-center space-x-3 mt-2">
                     <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
-                    <span className="text-white text-xs">
-                      Ready for FastAPI integration
+                    <span className="text-white">
+                      CXL memory pool rebalancing needed
                     </span>
+                  </div>
+                  <div className="text-xs text-zinc-400 ml-5">
+                    Confidence: 92% • Optimize traffic distribution
                   </div>
                 </div>
               </div>
-            </div>
+            )}
+
+            {/* Simplified System Status - Only show when there are issues or healing */}
+            {(isHealing ||
+              chaosInjected ||
+              components.some((c) => c.status !== "healthy")) && (
+              <div className="absolute bottom-6 left-6 bg-zinc-900/60 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                <div className="flex items-center space-x-4 text-xs">
+                  {chaosInjected && (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-red-400 rounded-full animate-pulse"></div>
+                      <span className="text-red-300">Chaos Active</span>
+                    </div>
+                  )}
+                  {isHealing && (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                      <span className="text-blue-300">AI Healing</span>
+                    </div>
+                  )}
+                  {components.some((c) => c.status === "failed") && (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-red-400 rounded-full"></div>
+                      <span className="text-red-400">
+                        {components.filter((c) => c.status === "failed").length}{" "}
+                        Failed
+                      </span>
+                    </div>
+                  )}
+                  {components.some((c) => c.status === "degraded") && (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
+                      <span className="text-yellow-400">
+                        {
+                          components.filter((c) => c.status === "degraded")
+                            .length
+                        }{" "}
+                        Degraded
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Bottom Panel - Gesture & Controls */}
-          <div className="h-32 bg-zinc-900/50 backdrop-blur-sm border-t border-zinc-800/30 p-6">
-            <div className="flex items-center justify-between h-full">
-              {/* Gesture Status */}
-              <div className="flex items-center space-x-8">
-                <div>
-                  <h3 className="text-sm font-medium text-zinc-200 mb-2">
-                    Gesture Recognition
+          {/* Bottom Panel - Mode-specific content */}
+          {currentMode === "game" && (
+            <div className="h-32 bg-zinc-900/50 backdrop-blur-sm border-t border-zinc-800/30 p-6">
+              <div className="flex items-center justify-between h-full">
+                {/* Gesture Status */}
+                <div className="flex items-center space-x-8">
+                  <div>
+                    <h3 className="text-sm font-medium text-zinc-200 mb-2">
+                      Gesture Recognition
+                    </h3>
+                    <div className="flex items-center space-x-3">
+                      <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
+                      <span className="text-sm text-white">Camera Active</span>
+                    </div>
+                    <div className="text-xs text-zinc-400 mt-1">
+                      Current:{" "}
+                      <span className="text-white font-medium">NONE</span> •
+                      Confidence: 0%
+                    </div>
+                  </div>
+
+                  {/* Gesture Controls */}
+                  <div className="grid grid-cols-4 gap-4 text-center text-xs">
+                    <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                      <div className="text-lg mb-1">✂️</div>
+                      <div className="text-white font-medium text-xs">
+                        ISOLATE LINK
+                      </div>
+                      <div className="text-zinc-400 text-xs">Scissors</div>
+                    </div>
+                    <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                      <div className="text-lg mb-1">✊</div>
+                      <div className="text-white font-medium text-xs">
+                        RETIMER BOOST
+                      </div>
+                      <div className="text-zinc-400 text-xs">Fist</div>
+                    </div>
+                    <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                      <div className="text-lg mb-1">✋</div>
+                      <div className="text-white font-medium text-xs">
+                        REROUTE TRAFFIC
+                      </div>
+                      <div className="text-zinc-400 text-xs">Palm</div>
+                    </div>
+                    <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                      <div className="text-lg mb-1">🙌</div>
+                      <div className="text-white font-medium text-xs">
+                        ENABLE BACKUP
+                      </div>
+                      <div className="text-zinc-400 text-xs">Both Hands</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Log */}
+                <div className="w-64">
+                  <h3 className="text-sm font-medium text-zinc-200 mb-3">
+                    Recent Actions
                   </h3>
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
-                    <span className="text-sm text-white">Camera Active</span>
-                  </div>
-                  <div className="text-xs text-zinc-400 mt-1">
-                    Current:{" "}
-                    <span className="text-white font-medium">NONE</span> •
-                    Confidence: 0%
-                  </div>
-                </div>
-
-                {/* Gesture Controls */}
-                <div className="grid grid-cols-4 gap-4 text-center text-xs">
-                  <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
-                    <div className="text-lg mb-1">✂️</div>
-                    <div className="text-white font-medium text-xs">
-                      ISOLATE LINK
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-zinc-500">12:34:56</span>
+                      <span className="text-white">✊ Retimer boosted</span>
                     </div>
-                    <div className="text-zinc-400 text-xs">Scissors</div>
-                  </div>
-                  <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
-                    <div className="text-lg mb-1">✊</div>
-                    <div className="text-white font-medium text-xs">
-                      RETIMER BOOST
+                    <div className="flex justify-between items-center">
+                      <span className="text-zinc-500">12:34:23</span>
+                      <span className="text-amber-400">
+                        🤖 Smart cable thermal alert
+                      </span>
                     </div>
-                    <div className="text-zinc-400 text-xs">Fist</div>
-                  </div>
-                  <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
-                    <div className="text-lg mb-1">✋</div>
-                    <div className="text-white font-medium text-xs">
-                      REROUTE TRAFFIC
+                    <div className="flex justify-between items-center">
+                      <span className="text-zinc-500">12:33:45</span>
+                      <span className="text-white">✋ Traffic rerouted</span>
                     </div>
-                    <div className="text-zinc-400 text-xs">Palm</div>
-                  </div>
-                  <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
-                    <div className="text-lg mb-1">🙌</div>
-                    <div className="text-white font-medium text-xs">
-                      ENABLE BACKUP
+                    <div className="flex justify-between items-center">
+                      <span className="text-zinc-500">12:33:12</span>
+                      <span className="text-emerald-400">
+                        ✅ CXL pool balanced
+                      </span>
                     </div>
-                    <div className="text-zinc-400 text-xs">Both Hands</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Log */}
-              <div className="w-64">
-                <h3 className="text-sm font-medium text-zinc-200 mb-3">
-                  Recent Actions
-                </h3>
-                <div className="space-y-2 text-xs">
-                  <div className="flex justify-between items-center">
-                    <span className="text-zinc-500">12:34:56</span>
-                    <span className="text-white">✊ Retimer boosted</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-zinc-500">12:34:23</span>
-                    <span className="text-amber-400">
-                      🤖 Smart cable thermal alert
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-zinc-500">12:33:45</span>
-                    <span className="text-white">✋ Traffic rerouted</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-zinc-500">12:33:12</span>
-                    <span className="text-emerald-400">
-                      ✅ CXL pool balanced
-                    </span>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

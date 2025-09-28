@@ -43,7 +43,10 @@ export interface TelemetryFrame {
   timestamp: string;
   system_health: number;
   total_bandwidth: number;
+  total_utilization: number;
   avg_latency: number;
+  avg_temperature: number;
+  avg_error_rate: number;
   active_components: number;
   failed_components: number;
   chaos_events: number;
@@ -110,10 +113,22 @@ export class SynapseNetWebSocket {
 
       this.ws.onmessage = (event) => {
         try {
-          const data: WebSocketMessage = JSON.parse(event.data);
-          this.handleMessage(data);
+          // Check for Infinity values before parsing
+          const rawData = event.data;
+          if (rawData.includes("Infinity") || rawData.includes("NaN")) {
+            console.warn("Received data with Infinity/NaN values, cleaning...");
+            const cleanedData = rawData
+              .replace(/Infinity/g, "999999")
+              .replace(/NaN/g, "0");
+            const data: WebSocketMessage = JSON.parse(cleanedData);
+            this.handleMessage(data);
+          } else {
+            const data: WebSocketMessage = JSON.parse(event.data);
+            this.handleMessage(data);
+          }
         } catch (error) {
           console.error("Error parsing WebSocket message:", error);
+          console.error("Raw data:", event.data);
         }
       };
 
@@ -165,6 +180,9 @@ export class SynapseNetWebSocket {
       case "simulation_started":
         this.notifyListeners("simulation_started", data);
         break;
+      case "simulation_stopped":
+        this.notifyListeners("simulation_stopped", data);
+        break;
       case "chaos_injected":
         this.notifyListeners("chaos_injected", data);
         break;
@@ -215,7 +233,13 @@ export class SynapseNetWebSocket {
     this.send({ type: "start_simulation" });
   }
 
+  public stopSimulation() {
+    console.log("📡 Sending stop simulation message...");
+    this.send({ type: "stop_simulation" });
+  }
+
   public injectChaos() {
+    console.log("📡 Sending chaos injection message...");
     this.send({ type: "inject_chaos" });
   }
 

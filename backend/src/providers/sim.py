@@ -527,6 +527,45 @@ class HardwareSimulator:
         for link in self.links.values():
             self._simulate_link_metrics(link)
     
+    def recover_from_chaos(self):
+        """Gradually recover system from chaos effects - MUCH SLOWER HEALING"""
+        current_time = time.time()
+        
+        # VERY SLOWLY recover components
+        for component in self.components.values():
+            if component.status == ComponentStatus.FAILED:
+                # Stay failed for longer, then move to degraded
+                if not hasattr(self, 'component_failure_times'):
+                    self.component_failure_times = {}
+                if component.id not in self.component_failure_times:
+                    self.component_failure_times[component.id] = current_time
+                elif current_time - self.component_failure_times[component.id] > 5:  # Stay failed for 5 seconds
+                    component.status = ComponentStatus.DEGRADED
+            elif component.status == ComponentStatus.DEGRADED:
+                # MUCH SLOWER improvement
+                component.utilization = max(20, component.utilization * 0.99)  # Very slowly reduce (was 0.95)
+                component.temperature = max(25, component.temperature * 0.995)  # Very slowly cool (was 0.98)
+                if component.utilization < 30 and component.temperature < 40:
+                    component.status = ComponentStatus.HEALTHY
+        
+        # VERY SLOWLY recover links
+        for link in self.links.values():
+            if link.status == ComponentStatus.FAILED:
+                # Stay failed for longer
+                if not hasattr(self, 'link_failure_times'):
+                    self.link_failure_times = {}
+                if link.id not in self.link_failure_times:
+                    self.link_failure_times[link.id] = current_time
+                elif current_time - self.link_failure_times[link.id] > 5:  # Stay failed for 5 seconds
+                    link.status = ComponentStatus.DEGRADED
+            elif link.status == ComponentStatus.DEGRADED:
+                # MUCH SLOWER improvement
+                link.utilization = max(10, link.utilization * 0.95)  # Very slowly reduce (was 0.9)
+                link.error_rate = max(0.01, link.error_rate * 0.9)  # Very slowly reduce (was 0.8)
+                link.latency_ms = max(link.max_latency_ms, link.latency_ms * 0.95)  # Very slowly reduce (was 0.9)
+                if link.utilization < 20 and link.error_rate < 1:
+                    link.status = ComponentStatus.HEALTHY
+    
     def get_telemetry(self) -> TelemetryFrame:
         """Get current telemetry data"""
         # Calculate system-wide metrics
@@ -551,23 +590,36 @@ class HardwareSimulator:
             else:
                 return  # No targets available
         
-        if target_id in self.components:
-            comp = self.components[target_id]
-            if chaos_type == "overload":
-                comp.utilization = min(100, comp.utilization * 1.5)
-            elif chaos_type == "overheat":
-                comp.temperature = min(150, comp.temperature + 20)
-            elif chaos_type == "failure":
-                comp.status = ComponentStatus.FAILED
-                
-        elif target_id in self.links:
-            link = self.links[target_id]
-            if chaos_type == "latency_spike":
-                link.latency_ms = min(link.max_latency_ms * 10, link.latency_ms * 5)
-            elif chaos_type == "congestion":
-                link.utilization = min(100, link.utilization * 1.8)
-            elif chaos_type == "failure":
-                link.status = ComponentStatus.FAILED
+        print(f"🔥💥💀 TOTAL SYSTEM CHAOS INJECTION! 💀💥🔥")
+        
+        # NUCLEAR CHAOS - AFFECT THE ENTIRE SYSTEM!
+        affected_count = 0
+        current_time = time.time()
+        
+        # RESET FAILURE TIMERS - This fixes the healing duration issue!
+        if hasattr(self, 'component_failure_times'):
+            self.component_failure_times.clear()
+        if hasattr(self, 'link_failure_times'):
+            self.link_failure_times.clear()
+        
+        # DESTROY ALL COMPONENTS
+        for comp in self.components.values():
+            comp.utilization = 100.0  # MAX OUT EVERYTHING
+            comp.temperature = 150.0  # MAXIMUM TEMPERATURE
+            comp.status = ComponentStatus.FAILED  # COMPLETE SYSTEM FAILURE
+            print(f"💥💥💥 SYSTEM CHAOS: {comp.name} FAILED! Util: 100%, Temp: 150°C")
+            affected_count += 1
+        
+        # DESTROY ALL LINKS
+        for link in self.links.values():
+            link.latency_ms = min(1000.0, link.max_latency_ms * 100)  # Cap at 1000ms to avoid Infinity
+            link.utilization = 100.0  # MAX OUT
+            link.error_rate = 50.0  # MAXIMUM ERROR RATE
+            link.status = ComponentStatus.FAILED  # COMPLETE FAILURE
+            print(f"💥💥💥 SYSTEM CHAOS: {link.id} FAILED! Latency: {link.latency_ms:.2f}ms, Util: 100%, Errors: 50%")
+            affected_count += 1
+        
+        print(f"💀💀💀 TOTAL SYSTEM DESTRUCTION: {affected_count} components/links DESTROYED! 💀💀💀")
     
     def get_component_ids(self) -> List[str]:
         """Get list of all component IDs"""

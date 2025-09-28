@@ -265,16 +265,22 @@ class KPIScorecard:
             self.metrics.resilience_score = 0.0
             return
             
-        # Count healthy vs degraded/failed components
-        healthy_count = sum(1 for comp in telemetry.components 
-                          if comp.status == ComponentStatus.HEALTHY)
-        degraded_count = sum(1 for comp in telemetry.components 
-                           if comp.status == ComponentStatus.DEGRADED)
-        failed_count = sum(1 for comp in telemetry.components 
-                         if comp.status == ComponentStatus.FAILED)
+        # Count healthy vs degraded/failed components + factor in utilization/temperature stress
+        healthy_score = 0
+        for comp in telemetry.components:
+            if comp.status == ComponentStatus.HEALTHY:
+                # Reduce score for high utilization and temperature (CHAOS SENSITIVE)
+                util_penalty = max(0, (comp.utilization - 80) * 0.02)  # Penalty above 80%
+                temp_penalty = max(0, (comp.temperature - 70) * 0.01)  # Penalty above 70°C
+                component_score = max(0.1, 1.0 - util_penalty - temp_penalty)  # Min 0.1 for healthy
+                healthy_score += component_score
+            elif comp.status == ComponentStatus.DEGRADED:
+                healthy_score += 0.3  # Reduced from 0.5 - degraded is worse now
+            elif comp.status == ComponentStatus.FAILED:
+                healthy_score += 0.0
         
         # Calculate weighted resilience
-        resilience = (healthy_count * 1.0 + degraded_count * 0.5 + failed_count * 0.0) / total_components
+        resilience = healthy_score / total_components
         self.metrics.resilience_score = resilience * 100
         
         # Factor in link health
@@ -517,12 +523,19 @@ class KPIScorecard:
             return
             
         for link in active_links:
-            # Signal quality degrades with high latency and utilization
-            latency_penalty = min(50, link.latency_ms * 5)  # Up to 50% penalty for high latency
-            utilization_penalty = max(0, (link.utilization - 70) * 2)  # Penalty above 70% util
-            error_penalty = link.error_rate * 10  # 10% penalty per 1% error rate
+            # MUCH MORE SENSITIVE TO CHAOS - Signal quality degrades dramatically
+            latency_penalty = min(80, link.latency_ms * 15)  # Up to 80% penalty for high latency (3x more sensitive)
+            utilization_penalty = max(0, (link.utilization - 60) * 4)  # Penalty above 60% util (2x more sensitive)
+            error_penalty = link.error_rate * 25  # 25% penalty per 1% error rate (2.5x more sensitive)
             
-            link_score = max(0, 100 - latency_penalty - utilization_penalty - error_penalty)
+            # Extra penalty for degraded status
+            status_penalty = 0
+            if link.status == ComponentStatus.DEGRADED:
+                status_penalty = 40  # Big penalty for degraded links
+            elif link.status == ComponentStatus.FAILED:
+                status_penalty = 100  # Complete penalty for failed links
+            
+            link_score = max(0, 100 - latency_penalty - utilization_penalty - error_penalty - status_penalty)
             total_score += link_score
             
         self.metrics.signal_integrity_score = total_score / len(active_links)
@@ -543,12 +556,18 @@ class KPIScorecard:
             return
             
         for link in pcie_links:
-            # Higher compensation needed for longer distances (simulated by latency)
-            # and higher error rates
-            distance_compensation = min(80, link.latency_ms * 20)  # Up to 80% for high latency
-            error_compensation = min(20, link.error_rate * 4)  # Up to 20% for errors
+            # DRAMATIC compensation for chaos - much more sensitive
+            distance_compensation = min(100, link.latency_ms * 50)  # Up to 100% for high latency (2.5x more sensitive)
+            error_compensation = min(50, link.error_rate * 10)  # Up to 50% for errors (2.5x more sensitive)
             
-            link_compensation = distance_compensation + error_compensation
+            # Status penalty - FAILED/DEGRADED links need MAXIMUM compensation
+            status_penalty = 0
+            if link.status == ComponentStatus.FAILED:
+                status_penalty = 100  # MAXIMUM compensation for failed links
+            elif link.status == ComponentStatus.DEGRADED:
+                status_penalty = 50   # HIGH compensation for degraded links
+            
+            link_compensation = distance_compensation + error_compensation + status_penalty
             total_compensation += link_compensation
             
         self.metrics.retimer_compensation_level = min(100, total_compensation / len(pcie_links))
@@ -570,16 +589,19 @@ class KPIScorecard:
             
         total_health = 0.0
         for link in gpu_links:
-            if link.status != ComponentStatus.HEALTHY:
-                link_health = 0.0
+            if link.status == ComponentStatus.FAILED:
+                link_health = 0.0  # Complete failure
+            elif link.status == ComponentStatus.DEGRADED:
+                link_health = 20.0  # Severely degraded
             else:
-                # Health degrades with high utilization and temperature stress
-                util_penalty = max(0, (link.utilization - 80) * 2)  # Penalty above 80%
+                # MUCH MORE SENSITIVE to chaos - health degrades dramatically
+                util_penalty = max(0, (link.utilization - 60) * 4)  # Penalty above 60% (2x more sensitive)
+                error_penalty = link.error_rate * 5  # 5% penalty per 1% error rate
                 
                 # Simulate thermal stress based on high bandwidth usage
-                thermal_stress = min(30, (link.bandwidth_gbps / 100) * 10)  # Up to 30% penalty
+                thermal_stress = min(50, (link.bandwidth_gbps / 50) * 10)  # Up to 50% penalty (more sensitive)
                 
-                link_health = max(0, 100 - util_penalty - thermal_stress)
+                link_health = max(0, 100 - util_penalty - error_penalty - thermal_stress)
             
             total_health += link_health
             

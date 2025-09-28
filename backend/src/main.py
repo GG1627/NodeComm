@@ -142,12 +142,21 @@ async def get_system_status():
         ))
         current_scorecard = scorecard.get_current_scorecard()
     
+    # Calculate real-time metrics from components and links
+    total_utilization = sum(comp.utilization for comp in telemetry.components) / len(telemetry.components) if telemetry.components else 0
+    avg_temperature = sum(comp.temperature for comp in telemetry.components) / len(telemetry.components) if telemetry.components else 25
+    avg_error_rate = sum(link.error_rate for link in telemetry.links) / len(telemetry.links) if telemetry.links else 0.01
+    total_bandwidth = sum(link.bandwidth_gbps for link in telemetry.links) if telemetry.links else 0
+    
     # Create frontend-compatible telemetry
     frontend_telemetry = {
         "timestamp": str(telemetry.timestamp),
-        "system_health": telemetry.system_metrics.get("avg_utilization", 0),
-        "total_bandwidth": telemetry.system_metrics.get("total_bandwidth_gbps", 0),
+        "system_health": telemetry.system_metrics.get("avg_utilization", total_utilization),
+        "total_bandwidth": total_bandwidth,
+        "total_utilization": total_utilization,  # Frontend expects this
         "avg_latency": telemetry.system_metrics.get("avg_latency_ms", 0),
+        "avg_temperature": avg_temperature,  # Frontend expects this
+        "avg_error_rate": avg_error_rate,  # Frontend expects this
         "active_components": telemetry.system_metrics.get("healthy_components", 0),
         "failed_components": len(simulator.components) - telemetry.system_metrics.get("healthy_components", 0),
         "chaos_events": 0
@@ -253,6 +262,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     json.dumps({"type": "simulation_started", "timestamp": datetime.now().isoformat()}),
                     websocket
                 )
+            elif message.get("type") == "stop_simulation":
+                if simulation_running:
+                    await stop_simulation()
+                await manager.send_personal_message(
+                    json.dumps({"type": "simulation_stopped", "timestamp": datetime.now().isoformat()}),
+                    websocket
+                )
             elif message.get("type") == "inject_chaos":
                 if simulator:
                     simulator.inject_chaos()
@@ -282,6 +298,9 @@ async def simulation_loop():
             # Update simulation
             simulator.update()
             
+            # Gradually recover from chaos (if not actively injecting)
+            simulator.recover_from_chaos()
+            
             # Get current telemetry
             telemetry = simulator.get_telemetry()
             
@@ -294,12 +313,21 @@ async def simulation_loop():
             current_scorecard = scorecard.get_current_scorecard()
             current_metrics = scorecard.get_current_metrics()
             
+            # Calculate real-time metrics from components and links
+            total_utilization = sum(comp.utilization for comp in telemetry.components) / len(telemetry.components) if telemetry.components else 0
+            avg_temperature = sum(comp.temperature for comp in telemetry.components) / len(telemetry.components) if telemetry.components else 25
+            avg_error_rate = sum(link.error_rate for link in telemetry.links) / len(telemetry.links) if telemetry.links else 0.01
+            total_bandwidth = sum(link.bandwidth_gbps for link in telemetry.links) if telemetry.links else 0
+            
             # Create frontend-compatible telemetry
             frontend_telemetry = {
                 "timestamp": str(telemetry.timestamp),
-                "system_health": telemetry.system_metrics.get("avg_utilization", 0),
-                "total_bandwidth": telemetry.system_metrics.get("total_bandwidth_gbps", 0),
+                "system_health": telemetry.system_metrics.get("avg_utilization", total_utilization),
+                "total_bandwidth": total_bandwidth,
+                "total_utilization": total_utilization,  # Frontend expects this
                 "avg_latency": telemetry.system_metrics.get("avg_latency_ms", 0),
+                "avg_temperature": avg_temperature,  # Frontend expects this
+                "avg_error_rate": avg_error_rate,  # Frontend expects this
                 "active_components": telemetry.system_metrics.get("healthy_components", 0),
                 "failed_components": len(simulator.components) - telemetry.system_metrics.get("healthy_components", 0),
                 "chaos_events": 0
@@ -314,22 +342,38 @@ async def simulation_loop():
                 "cxl_channel_utilization": current_metrics.cxl_channel_utilization
             })
             
-            # Prepare broadcast data
+            # Prepare broadcast data with safety checks
+            def clean_for_json(obj):
+                """Remove Infinity and NaN values that break JSON serialization"""
+                if isinstance(obj, dict):
+                    return {k: clean_for_json(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [clean_for_json(item) for item in obj]
+                elif isinstance(obj, float):
+                    if obj == float('inf') or obj == float('-inf'):
+                        return 999999.0
+                    elif obj != obj:  # NaN check
+                        return 0.0
+                    else:
+                        return obj
+                else:
+                    return obj
+            
             broadcast_data = {
                 "type": "system_update",
                 "timestamp": str(telemetry.timestamp),
-                "components": [comp.dict() for comp in telemetry.components],
-                "links": [link.dict() for link in telemetry.links],
-                "telemetry": frontend_telemetry,
-                "scorecard": enhanced_scorecard,
+                "components": [clean_for_json(comp.dict()) for comp in telemetry.components],
+                "links": [clean_for_json(link.dict()) for link in telemetry.links],
+                "telemetry": clean_for_json(frontend_telemetry),
+                "scorecard": clean_for_json(enhanced_scorecard),
                 "simulation_running": simulation_running
             }
             
             # Broadcast to all connected clients
             await manager.broadcast(json.dumps(broadcast_data))
             
-            # Sleep for simulation interval (60 FPS = ~16.67ms, but we'll use 100ms for stability)
-            await asyncio.sleep(0.1)
+            # Sleep for simulation interval (slower for better visibility - 2 FPS = 500ms)
+            await asyncio.sleep(0.5)
             
         except Exception as e:
             logger.error(f"Error in simulation loop: {e}")
