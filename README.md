@@ -2,7 +2,8 @@
 
 <div align="center">
 
-![SynapseNet Demo](frontend/images/img1.png)
+![NodeComm
+Demo](frontend/images/img1.png)
 
 **An interactive 3D hardware atlas where you control datacenter components with hand gestures**
 
@@ -13,9 +14,10 @@
 
 </div>
 
-## 🚀 What is SynapseNet?
+## 🚀 What is NodeComm
+?
 
-SynapseNet reimagines what it means to be connected by making the invisible world of hardware interactions tangible and interactive. It's a **gesture-controlled 3D simulation** where you manage CPU cores, GPU clusters, and network switches using hand movements - turning complex system administration into an engaging, visual experience.
+NodeComm reimagines what it means to be connected by making the invisible world of hardware interactions tangible and interactive. It's a **gesture-controlled 3D simulation** where you manage CPU cores, GPU clusters, and network switches using hand movements - turning complex system administration into an engaging, visual experience.
 
 ![Learning Mode](frontend/images/img2.png)
 
