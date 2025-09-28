@@ -14,6 +14,7 @@ class ComponentType(str, Enum):
     MEMORY = "memory"
     SWITCH = "switch"
     STORAGE = "storage"
+    NETWORK = "network"
 
 
 class LinkType(str, Enum):

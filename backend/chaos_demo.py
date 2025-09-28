@@ -43,7 +43,7 @@ def scenario_cpu_overload():
     print("🎯 Baseline system running normally...")
     
     # Inject CPU overload
-    print("💥 AI injects CPU overload attack!")
+    print("💥 AI Accelerator thermal stress (Smart Cable overload)!")
     sim.inject_chaos("cpu_0", "overload")
     
     # Show effects over time
@@ -68,7 +68,7 @@ def scenario_network_congestion():
     print("🎯 Baseline network traffic flowing normally...")
     
     # Inject congestion on multiple links
-    print("💥 AI floods the network with traffic!")
+    print("💥 CXL memory bandwidth saturation + Smart Cable overload!")
     sim.inject_chaos("cpu_switch_link", "congestion")
     sim.inject_chaos("switch_gpu_link", "congestion")
     
