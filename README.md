@@ -1,4 +1,4 @@
-# 🧠 SynapseNet: Gesture-Controlled Digital Nervous System
+# 🧠 NodeComm: Gesture-Controlled Digital Nervous System
 
 <div align="center">
 
