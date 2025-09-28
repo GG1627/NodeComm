@@ -5,6 +5,7 @@ FastAPI server for SynapseNet - Real-time hardware simulation with WebSocket str
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Dict, List, Optional
 from pathlib import Path
@@ -21,6 +22,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from schemas import SystemState, TelemetryFrame, Scorecard, HardwareComponent, Link
 from providers.sim import HardwareSimulator
 from kpi.scorecard import KPIScorecard
+
+# Import Learn Mode Computer Vision
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from learn_mode_cv import learn_mode_tracker, LearnModeCVResult
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -238,6 +245,111 @@ async def inject_chaos(chaos_type: str = "random"):
         logger.error(f"Error injecting chaos: {e}")
         raise HTTPException(status_code=500, detail=f"Error injecting chaos: {str(e)}")
 
+# Learn Mode Computer Vision - Process frames from frontend
+cv_processor = None
+last_frame_time = 0
+MIN_FRAME_INTERVAL = 0.05  # Minimum 50ms between frames (20 FPS max)
+
+def process_frame(frame_data: str) -> dict:
+    """Process a frame from frontend and return hand tracking results"""
+    global last_frame_time
+    
+    # Rate limiting to prevent overwhelming the system
+    current_time = time.time()
+    if current_time - last_frame_time < MIN_FRAME_INTERVAL:
+        return {"hands": [], "skipped": True}
+    
+    last_frame_time = current_time
+    
+    try:
+        # Import here to avoid circular imports
+        import cv2
+        import numpy as np
+        import base64
+        from learn_mode_cv import learn_mode_tracker
+        
+        # Decode base64 frame
+        frame_b64 = frame_data.split(',')[1]  # Remove data:image/jpeg;base64, prefix
+        frame_bytes = base64.b64decode(frame_b64)
+        frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            print("❌ Failed to decode frame")
+            return {"hands": [], "error": "Failed to decode frame"}
+        
+        print(f"✅ Frame decoded: {frame.shape}")
+        
+        # Flip horizontally for mirror effect
+        frame = cv2.flip(frame, 1)
+        frame_height, frame_width = frame.shape[:2]
+        
+        # Convert BGR to RGB for MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Process with MediaPipe
+        start_time = time.time()
+        results = learn_mode_tracker.hands.process(rgb_frame)
+        processing_time = (time.time() - start_time) * 1000  # ms
+        
+        print(f"🔍 MediaPipe processing: {processing_time:.1f}ms")
+        print(f"📊 Results: {results.multi_hand_landmarks is not None}")
+        
+        # Extract hand data
+        hands_data = []
+        if results.multi_hand_landmarks:
+            handedness_list = results.multi_handedness if results.multi_handedness else []
+            
+            for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
+                # Get handedness
+                handedness = "Unknown"
+                if idx < len(handedness_list):
+                    handedness = handedness_list[idx].classification[0].label
+                
+                # Extract landmarks
+                landmarks = []
+                for landmark in hand_landmarks.landmark:
+                    landmarks.append({
+                        "x": landmark.x,
+                        "y": landmark.y,
+                        "z": landmark.z,
+                        "visibility": landmark.visibility if hasattr(landmark, 'visibility') else 1.0
+                    })
+                
+                # Calculate bounding box
+                x_coords = [lm["x"] for lm in landmarks]
+                y_coords = [lm["y"] for lm in landmarks]
+                bbox = {
+                    'x': min(x_coords),
+                    'y': min(y_coords),
+                    'width': max(x_coords) - min(x_coords),
+                    'height': max(y_coords) - min(y_coords)
+                }
+                
+                # Create hand data
+                hand_data = {
+                    "hand_id": idx,
+                    "handedness": handedness,
+                    "landmarks": landmarks,
+                    "bounding_box": bbox,
+                    "timestamp": time.time(),
+                    "confidence": 0.8
+                }
+                
+                hands_data.append(hand_data)
+        
+        return {
+            "hands": hands_data,
+            "frame_width": frame_width,
+            "frame_height": frame_height,
+            "timestamp": time.time(),
+            "processing_time_ms": processing_time
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing frame: {e}")
+        return {"hands": [], "error": str(e)}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time data streaming"""
@@ -276,6 +388,44 @@ async def websocket_endpoint(websocket: WebSocket):
                     json.dumps({"type": "chaos_injected", "timestamp": datetime.now().isoformat()}),
                     websocket
                 )
+            elif message.get("type") == "cv_frame":
+                # Process frame from frontend
+                frame_data = message.get("frame")
+                if frame_data:
+                    try:
+                        print("📥 Received frame from frontend")
+                        result = process_frame(frame_data)
+                        
+                        # Skip sending response for rate-limited frames
+                        if result.get("skipped", False):
+                            print("⏭️ Frame skipped due to rate limiting")
+                            continue
+                            
+                        print(f"🖐️ Processed frame: {len(result.get('hands', []))} hands detected")
+                        
+                        cv_response = {
+                            "type": "learn_mode_cv_data",
+                            "hands": result["hands"],
+                            "frame_width": result.get("frame_width", 320),
+                            "frame_height": result.get("frame_height", 240),
+                            "timestamp": result.get("timestamp", time.time()),
+                            "processing_time_ms": result.get("processing_time_ms", 0)
+                        }
+                        await manager.send_personal_message(
+                            json.dumps(cv_response),
+                            websocket
+                        )
+                    except Exception as e:
+                        logger.error(f"Error processing CV frame: {e}")
+                        await manager.send_personal_message(
+                            json.dumps({
+                                "type": "learn_mode_cv_data",
+                                "hands": [],
+                                "error": str(e),
+                                "timestamp": time.time()
+                            }),
+                            websocket
+                        )
             
     except WebSocketDisconnect:
         manager.disconnect(websocket)

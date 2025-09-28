@@ -69,7 +69,7 @@ export interface Scorecard {
 
 export interface WebSocketMessage {
   type: string;
-  timestamp?: string;
+  timestamp?: string | number;
   [key: string]: any;
 }
 
@@ -185,6 +185,12 @@ export class SynapseNetWebSocket {
         break;
       case "chaos_injected":
         this.notifyListeners("chaos_injected", data);
+        break;
+      case "learn_mode_cv_data":
+        this.notifyListeners("learn_mode_cv_data", data);
+        break;
+      case "cv_frame":
+        this.notifyListeners("cv_frame", data);
         break;
       default:
         console.log("Unknown message type:", data.type, data);

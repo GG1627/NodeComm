@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simple Drag Test</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 20px;
+        background: #1a1a1a;
+        color: white;
+        font-family: Arial, sans-serif;
+      }
+      .test-node {
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        background: #3b82f6;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        cursor: move;
+        user-select: none;
+      }
+      .instructions {
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        background: rgba(0, 0, 0, 0.8);
+        padding: 15px;
+        border-radius: 8px;
+        z-index: 1000;
+      }
+      .status {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.8);
+        padding: 15px;
+        border-radius: 8px;
+        z-index: 1000;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="instructions">
+      <h3>Simple Drag Test</h3>
+      <p>1. Point at the blue circle</p>
+      <p>2. Press SPACE to grab</p>
+      <p>3. Move your finger to drag</p>
+      <p>4. Press SPACE to release</p>
+    </div>
+
+    <div class="status" id="status">Ready - Point and press SPACE</div>
+
+    <div class="test-node" id="testNode" style="left: 400px; top: 300px">
+      NODE
+    </div>
+
+    <script>
+      let isGrabbed = false;
+      let fingerPos = null;
+      let lastKeyPress = 0;
+      let grabTime = 0;
+
+      // Mock finger position (simulate CV data)
+      function simulateFingerMovement() {
+        const centerX = window.innerWidth / 2;
+        const centerY = window.innerHeight / 2;
+        const time = Date.now() / 1000;
+
+        fingerPos = {
+          x: centerX + Math.sin(time) * 100,
+          y: centerY + Math.cos(time) * 100,
+        };
+
+        updateStatus();
+
+        if (isGrabbed) {
+          dragNode();
+        }
+      }
+
+      function updateStatus() {
+        const status = document.getElementById("status");
+        if (isGrabbed) {
+          status.innerHTML = `DRAGGING - Press SPACE to release`;
+          status.style.background = "rgba(34, 197, 94, 0.8)";
+        } else {
+          status.innerHTML = `Ready - Point and press SPACE<br>Finger: (${
+            fingerPos ? Math.round(fingerPos.x) : "N/A"
+          }, ${fingerPos ? Math.round(fingerPos.y) : "N/A"})`;
+          status.style.background = "rgba(0,0,0,0.8)";
+        }
+      }
+
+      function dragNode() {
+        if (!isGrabbed || !fingerPos) return;
+
+        const node = document.getElementById("testNode");
+        node.style.left = fingerPos.x - 30 + "px";
+        node.style.top = fingerPos.y - 30 + "px";
+
+        console.log(`🎯 DRAGGING: node at (${fingerPos.x}, ${fingerPos.y})`);
+      }
+
+      function grabNode() {
+        if (isGrabbed) return;
+
+        const node = document.getElementById("testNode");
+        const nodeRect = node.getBoundingClientRect();
+        const nodeCenter = {
+          x: nodeRect.left + 30,
+          y: nodeRect.top + 30,
+        };
+
+        const distance = Math.sqrt(
+          Math.pow(fingerPos.x - nodeCenter.x, 2) +
+            Math.pow(fingerPos.y - nodeCenter.y, 2)
+        );
+
+        if (distance < 80) {
+          isGrabbed = true;
+          grabTime = Date.now();
+          console.log(`⌨️ GRABBED: node at distance ${distance.toFixed(1)}`);
+          updateStatus();
+        } else {
+          console.log(
+            `⌨️ SPACE: No node found at distance ${distance.toFixed(1)}`
+          );
+        }
+      }
+
+      function releaseNode() {
+        if (!isGrabbed) return;
+
+        const holdTime = Date.now() - grabTime;
+        if (holdTime < 1000) {
+          console.log(`⌨️ HOLD: Must hold for ${1000 - holdTime}ms more`);
+          return;
+        }
+
+        isGrabbed = false;
+        console.log(`⌨️ RELEASED: node after ${holdTime}ms`);
+        updateStatus();
+      }
+
+      // Keyboard handler
+      document.addEventListener("keydown", (event) => {
+        if (event.code === "Space") {
+          event.preventDefault();
+
+          const now = Date.now();
+          if (now - lastKeyPress < 2000) {
+            console.log(
+              `⌨️ DEBOUNCED: ${2000 - (now - lastKeyPress)}ms remaining`
+            );
+            return;
+          }
+          lastKeyPress = now;
+
+          if (!isGrabbed) {
+            grabNode();
+          } else {
+            releaseNode();
+          }
+        }
+      });
+
+      // Simulate finger movement
+      setInterval(simulateFingerMovement, 50);
+
+      // Initial status
+      updateStatus();
+    </script>
+  </body>
+</html>
