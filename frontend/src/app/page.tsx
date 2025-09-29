@@ -202,6 +202,7 @@ export default function Home() {
     message: string;
     startTime: number;
   } | null>(null);
+  const aiAttackRef = useRef<typeof aiAttack>(null);
   const [gameWon, setGameWon] = useState(false);
   const [aiPredictions, setAiPredictions] = useState<
     Array<{
@@ -210,10 +211,13 @@ export default function Home() {
       timestamp: number;
     }>
   >([]);
+  // Removed losing-streak mechanics; keeping placeholder for minimal change surface
   const [consecutiveLosses, setConsecutiveLosses] = useState(0);
   const [playerScore, setPlayerScore] = useState(0);
   const [aiScore, setAiScore] = useState(0);
   const [autoPredictionsActive, setAutoPredictionsActive] = useState(false);
+  const [roundResolved, setRoundResolved] = useState(false);
+  const [hintShownThisRound, setHintShownThisRound] = useState(false);
   const [latencyHistory, setLatencyHistory] = useState<number[]>([]);
   const [particlesEnabled, setParticlesEnabled] = useState(true);
 
@@ -605,6 +609,8 @@ export default function Home() {
     synapseNetWS.on("game_started", (data) => {
       console.log("🎮 Game started:", data);
       setGameState("playing");
+      // Ensure simulator is running during game mode for ML hints
+      synapseNetWS.startSimulation();
     });
 
     synapseNetWS.on("action_result", (data) => {
@@ -619,6 +625,10 @@ export default function Home() {
 
     synapseNetWS.on("ml_predictions", (data) => {
       console.log("🤖 ML predictions:", data);
+      const count = Array.isArray(data.predictions)
+        ? data.predictions.length
+        : 0;
+      console.log(`🤖 Received ${count} ML prediction(s)`);
       setMLPredictions(data.predictions || []);
     });
 
@@ -794,6 +804,8 @@ export default function Home() {
     }
   }, [currentMode, gameState, cvEnabled, cameraStream]);
 
+  // Allow CV in Learn Mode; do not auto-disable when switching modes
+
   // Maintain lightweight latency history for sparkline (Learn Mode)
   useEffect(() => {
     if (currentMode !== "learn") return;
@@ -828,6 +840,11 @@ export default function Home() {
     };
   }, [gameState]);
 
+  // Keep a live ref of current AI attack for timeout logic
+  useEffect(() => {
+    aiAttackRef.current = aiAttack;
+  }, [aiAttack]);
+
   // SIMPLE Round timer - just count down
   useEffect(() => {
     if (gameState !== "playing") return;
@@ -846,30 +863,23 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [gameState]);
 
-  // SIMPLE Round end handler - just increment round
+  // SIMPLE Round end handler - guard against double-advance and increment round
   const handleRoundEnd = () => {
-    console.log(`⏰ Round ${currentRound} ended`);
-
-    // Check if player didn't respond to active attack
-    if (aiAttack) {
-      setConsecutiveLosses((prev) => prev + 1);
-      setAiScore((prev) => prev + 100);
-
-      // Check for game over (3 losses)
-      if (consecutiveLosses + 1 >= 3) {
-        setGamePhase("game_over");
-        setGameWon(false);
-        setAiAttack(null);
-        return;
-      }
-    }
-
-    // Check if we've completed 6 rounds
-    if (currentRound >= 6) {
-      setGameWon(true);
-      setGamePhase("game_over");
+    // Prevent double increment if we've already ended the round or game
+    if (gamePhase === "round_end" || gamePhase === "game_over") {
       return;
     }
+    console.log(`⏰ Round ${currentRound} ended`);
+
+    // Check if player didn't respond to active attack (use ref to avoid stale closure)
+    if (aiAttackRef.current && !roundResolved) {
+      setAiScore((prev) => prev + 100);
+      setRoundResolved(true);
+      // Clear the expired attack
+      setAiAttack(null);
+    }
+
+    // Infinite play: no win condition by rounds
 
     // SIMPLE: Just add 1 to the round
     setCurrentRound((prev) => prev + 1);
@@ -878,7 +888,7 @@ export default function Home() {
     setRoundTimeLeft(10);
   };
 
-  // AI Attack logic with predictions
+  // AI Attack logic
   useEffect(() => {
     if (gameState !== "playing" || gamePhase !== "waiting") return;
 
@@ -935,29 +945,32 @@ export default function Home() {
         startTime: Date.now(), // Track when attack started for grace period
       });
       setGamePhase("ai_attack");
-
-      // Keep the attack active for the entire round - player can respond anytime
-      // No need to transition phases - just let the round timer handle the timing
-
-      // Show AI predictions at 8 seconds left (using trained ML model)
-      setTimeout(() => {
-        console.log("🔮 Auto-generating AI predictions at 8 seconds left...");
-        setAutoPredictionsActive(true);
-        // Request real ML predictions from our trained model
-        synapseNetWS.getMLPredictions();
-
-        // Clear the indicator after 3 seconds
-        setTimeout(() => setAutoPredictionsActive(false), 3000);
-      }, 2000); // Wait 2 seconds after attack starts (when timer is at 8 seconds)
+      setHintShownThisRound(false);
+      setRoundResolved(false);
+      setMLPredictions([]);
     }, 1000);
 
     return () => clearTimeout(attackTimer);
   }, [gameState, gamePhase]);
 
+  // Auto-trigger ML hints at 5s remaining during AI attack (tolerant <=5)
+  useEffect(() => {
+    if (gameState !== "playing" || gamePhase !== "ai_attack" || !aiAttack)
+      return;
+    if (roundTimeLeft <= 5 && roundTimeLeft > 0 && !hintShownThisRound) {
+      console.log("🔮 Auto-triggering ML hints at 5s remaining...");
+      setAutoPredictionsActive(true);
+      setHintShownThisRound(true);
+      synapseNetWS.getMLPredictions();
+      // Fade the active indicator after a short time
+      setTimeout(() => setAutoPredictionsActive(false), 3000);
+    }
+  }, [gameState, gamePhase, aiAttack, roundTimeLeft, hintShownThisRound]);
+
   // BULLETPROOF Gesture Detection
   useEffect(() => {
     // Only process when there's an active attack
-    if (!aiAttack || gamePhase === "round_end" || gamePhase === "game_over") {
+    if (!aiAttack || gamePhase === "round_end") {
       return;
     }
 
@@ -990,10 +1003,9 @@ export default function Home() {
 
       if (currentGesture === correctResponse) {
         // Correct response!
-        const points = 100 + (consecutiveLosses === 0 ? 50 : 0); // Bonus for breaking losing streak
+        const points = 100;
         setPlayerScore((prev) => prev + points);
         setGameScore((prev) => prev + points);
-        setConsecutiveLosses(0); // Reset losing streak
         setRecentActions((prev) => [
           {
             action: `✅ Defended ${aiAttack.target} with ${currentGesture}`,
@@ -1007,7 +1019,6 @@ export default function Home() {
         const penalty = 50;
         setPlayerScore((prev) => Math.max(0, prev - penalty));
         setGameScore((prev) => Math.max(0, prev - penalty));
-        setConsecutiveLosses((prev) => prev + 1);
         setAiScore((prev) => prev + 100); // AI gets points for successful attack
 
         setRecentActions((prev) => [
@@ -1019,12 +1030,7 @@ export default function Home() {
           ...prev.slice(0, 4),
         ]);
 
-        // Check for early game end (3 consecutive losses)
-        if (consecutiveLosses + 1 >= 3) {
-          setGamePhase("game_over");
-          setGameWon(false);
-          return;
-        }
+        // Keep playing: do not end game; losing streak tracked in UI
       }
 
       // Clear attack and move to next phase (successful response)
@@ -1033,15 +1039,10 @@ export default function Home() {
 
       // Move to next round after successful response
       setTimeout(() => {
-        if (currentRound >= 6) {
-          setGameWon(true);
-          setGamePhase("game_over");
-        } else {
-          // SIMPLE: Just add 1 to the round
-          setCurrentRound((prev) => prev + 1);
-          setGamePhase("waiting");
-          setRoundTimeLeft(10);
-        }
+        // Infinite play: always proceed to next round
+        setCurrentRound((prev) => prev + 1);
+        setGamePhase("waiting");
+        setRoundTimeLeft(10);
       }, 1000);
     } else {
       // Gesture detected but not meeting criteria
@@ -1050,13 +1051,7 @@ export default function Home() {
         console.log(`❌ Confidence too low: ${gestureConfidence} (need > 0.7)`);
       }
     }
-  }, [
-    currentGesture,
-    gestureConfidence,
-    gamePhase,
-    aiAttack,
-    consecutiveLosses,
-  ]);
+  }, [currentGesture, gestureConfidence, gamePhase, aiAttack]);
 
   // Helper function to get correct response
   const getCorrectResponse = (attackType: string) => {
@@ -2073,7 +2068,7 @@ export default function Home() {
           className="pointer-events-none absolute inset-x-0 -bottom-[1px] h-[1px]"
           style={{
             background:
-              "linear-gradient(90deg, rgba(34,197,94,0), rgba(34,197,94,0.4), rgba(34,197,94,0))",
+              "linear-gradient(90deg, rgba(84,206,199,0), rgba(84,206,199,0.4), rgba(84,206,199,0))",
           }}
         />
         <div className="flex items-center justify-between">
@@ -2237,7 +2232,14 @@ export default function Home() {
 
       {/* Game Mode Gesture Controls Row */}
       {currentMode === "game" && gameState === "playing" && (
-        <div className="bg-zinc-900/50 backdrop-blur-sm border-b border-zinc-800/30 p-4">
+        <div className="bg-zinc-900/50 backdrop-blur-sm border-b border-zinc-800/30 p-4 relative">
+          <div
+            className="pointer-events-none absolute inset-x-0 -bottom-[1px] h-[1px]"
+            style={{
+              background:
+                "linear-gradient(90deg, rgba(84,206,199,0), rgba(84,206,199,0.4), rgba(84,206,199,0))",
+            }}
+          />
           <div className="flex items-center justify-between">
             {/* Gesture Status */}
             <div className="flex items-center space-x-6">
@@ -2267,7 +2269,7 @@ export default function Home() {
               {/* Gesture Controls */}
               <div className="grid grid-cols-4 gap-3 text-center text-xs">
                 <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30 shadow-[0_2px_12px_rgba(0,0,0,0.25)]">
-                  <div className="text-lg mb-1">✂️</div>
+                  <div className="text-lg mb-1">✌️</div>
                   <div className="text-white font-medium text-xs">CUT</div>
                   <div className="text-zinc-400 text-xs">Scissors</div>
                 </div>
@@ -4418,7 +4420,7 @@ export default function Home() {
                     </p>
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="bg-zinc-800/40 rounded-lg p-3">
-                        <div className="text-lg mb-1">✂️</div>
+                        <div className="text-lg mb-1">✌️</div>
                         <div className="text-white font-medium">Cut</div>
                         <div className="text-zinc-400">Isolate problems</div>
                       </div>
@@ -4583,18 +4585,7 @@ export default function Home() {
                         )}
                       </div>
 
-                      {consecutiveLosses > 0 && (
-                        <div className="bg-orange-900/30 border border-orange-500/30 rounded-lg p-2">
-                          <div className="text-sm font-medium text-orange-200 mb-1">
-                            ⚠️ Losing Streak
-                          </div>
-                          <div className="text-xs text-orange-300">
-                            {consecutiveLosses} losses in a row
-                            {consecutiveLosses >= 2 && " - Danger zone!"}
-                            {consecutiveLosses >= 3 && " - Game over!"}
-                          </div>
-                        </div>
-                      )}
+                      {/* Losing streak UI removed */}
                     </div>
                   </div>
 
@@ -4611,10 +4602,10 @@ export default function Home() {
 
                     {/* Game Status */}
                     <div className="text-center mb-4">
-                      <div className="text-2xl font-bold text-white mb-2">
-                        Round {currentRound}
+                      <div className="text-2xl font-bold text-white mb-2 tracking-tight">
+                        Round {Math.floor((currentRound + 1) / 2)}
                       </div>
-                      <div className="text-4xl font-bold text-red-400 mb-2">
+                      <div className="text-4xl font-bold text-red-400 mb-2 drop-shadow-[0_2px_10px_rgba(239,68,68,0.35)]">
                         {roundTimeLeft}
                       </div>
                       <div className="text-sm text-zinc-400">
@@ -4624,24 +4615,47 @@ export default function Home() {
                         {gamePhase === "waiting" &&
                           "⏳ Waiting for AI attack..."}
                         {gamePhase === "round_end" && "✅ Round complete!"}
-                        {gamePhase === "game_over" &&
-                          (gameWon
-                            ? "🎉 You won!"
-                            : consecutiveLosses >= 3
-                            ? "💀 Game Over - 3 losses in a row!"
-                            : "Game over!")}
                       </div>
+
+                      {/* Center Hint/Countdown */}
+                      {gamePhase === "ai_attack" && (
+                        <div className="mt-2 text-xs">
+                          {roundTimeLeft > 5 ? (
+                            <div className="text-purple-300">
+                              Hint in {Math.max(0, roundTimeLeft - 5)}s
+                            </div>
+                          ) : roundTimeLeft > 0 ? (
+                            (() => {
+                              // Always use synthesized hint derived from current attack
+                              const derived = aiAttack
+                                ? {
+                                    message: `Suggested defense for ${aiAttack.type}`,
+                                    recommended_action: `Use ${getCorrectResponse(
+                                      aiAttack.type
+                                    ).toUpperCase()}`,
+                                  }
+                                : null;
+                              const show = derived;
+                              return (
+                                <div className="text-left inline-block bg-purple-600/20 border border-purple-500/30 text-purple-200 px-3 py-2 rounded-md">
+                                  <div className="text-white font-medium mb-1">
+                                    {show?.message || "System prediction"}
+                                  </div>
+                                  {show?.recommended_action && (
+                                    <div className="text-green-300">
+                                      💡 {show.recommended_action}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()
+                          ) : null}
+                        </div>
+                      )}
 
                       {/* CV Status and ML Prediction Button */}
                       <div className="mt-4 space-y-3">
-                        {cvEnabled ? (
-                          <div className="flex items-center justify-center space-x-2">
-                            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                            <span className="text-green-400 text-sm">
-                              CV Active
-                            </span>
-                          </div>
-                        ) : (
+                        {!cvEnabled ? (
                           <div className="text-center">
                             <div className="text-orange-400 text-sm mb-2">
                               ⚠️ Camera Required
@@ -4650,72 +4664,33 @@ export default function Home() {
                               Enable camera from the home screen to start
                             </div>
                           </div>
-                        )}
+                        ) : null}
 
-                        {/* AI Hints Display */}
-                        <div className="w-full border text-xs py-2 px-3 rounded-lg transition-colors bg-purple-600/20 border-purple-500/30 text-purple-300">
-                          {mlPredictions.length > 0 ? (
-                            <div className="space-y-2">
-                              {mlPredictions.map((prediction, index) => (
-                                <div key={index} className="text-left">
-                                  <div className="text-white font-medium mb-1">
-                                    {prediction.message || "System prediction"}
-                                  </div>
-                                  {prediction.recommended_action && (
-                                    <div className="text-green-300 text-xs">
-                                      💡 {prediction.recommended_action}
-                                    </div>
-                                  )}
-                                  <div className="text-zinc-400 text-xs">
-                                    Confidence:{" "}
-                                    {Math.round(
-                                      (prediction.confidence || 0) * 100
-                                    )}
-                                    %
-                                  </div>
-                                </div>
-                              ))}
-                              <button
-                                onClick={() => {
-                                  console.log(
-                                    "🔮 Requesting fresh ML predictions..."
-                                  );
-                                  synapseNetWS.getMLPredictions();
-                                }}
-                                className="w-full mt-2 bg-purple-600/30 hover:bg-purple-600/40 border border-purple-400/50 text-purple-200 text-xs py-1 px-2 rounded transition-colors"
-                              >
-                                🔄 Get Fresh Hints
-                              </button>
-                            </div>
-                          ) : (
+                        {/* AI Hints Display (hidden during active attack to avoid duplicate hint box) */}
+                        {gamePhase !== "ai_attack" && (
+                          <div className="w-full border text-xs py-2 px-3 rounded-lg transition-colors bg-purple-600/20 border-purple-500/30 text-purple-300">
                             <div className="text-center">
                               <div className="text-purple-300 mb-2">
                                 🔮 AI Hints
                               </div>
                               <div className="text-zinc-400 text-xs mb-2">
-                                No predictions yet
+                                Hints will appear during attacks
                               </div>
-                              <button
-                                onClick={() => {
-                                  console.log(
-                                    "🔮 Requesting ML predictions..."
-                                  );
-                                  synapseNetWS.getMLPredictions();
-                                }}
-                                className="w-full bg-purple-600/30 hover:bg-purple-600/40 border border-purple-400/50 text-purple-200 text-xs py-1 px-2 rounded transition-colors"
-                              >
-                                {autoPredictionsActive
-                                  ? "🔮 Analyzing..."
-                                  : "🔮 Get AI Hints"}
-                              </button>
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* AI Attack Display */}
                       {aiAttack && (
-                        <div className="mt-4 p-3 bg-red-900/30 border border-red-500/30 rounded-lg">
+                        <div className="mt-4 p-3 bg-red-900/30 border border-red-500/30 rounded-lg shadow-[0_6px_18px_rgba(239,68,68,0.15)] relative">
+                          <div
+                            className="pointer-events-none absolute inset-x-0 -top-[1px] h-[1px]"
+                            style={{
+                              background:
+                                "linear-gradient(90deg, rgba(239,68,68,0), rgba(239,68,68,0.5), rgba(239,68,68,0))",
+                            }}
+                          />
                           <div className="text-red-300 font-bold text-lg">
                             🚨 {aiAttack.message}
                           </div>
@@ -4816,44 +4791,9 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <div className="bg-zinc-800/40 rounded-lg p-3">
-                        <div className="text-xs font-medium text-zinc-200 mb-1">
-                          Consecutive Losses
-                        </div>
-                        <div className="text-lg font-bold text-orange-400">
-                          {consecutiveLosses}/3
-                        </div>
-                        <div className="text-xs text-zinc-400">
-                          {consecutiveLosses >= 2
-                            ? "⚠️ Danger!"
-                            : "Keep going!"}
-                        </div>
-                      </div>
+                      {/* Consecutive losses widget removed */}
 
-                      {/* AI Predictions */}
-                      {aiPredictions.length > 0 && (
-                        <div className="bg-zinc-800/40 rounded-lg p-3">
-                          <div className="text-xs font-medium text-zinc-200 mb-1">
-                            🔮 AI Predictions
-                          </div>
-                          <div className="space-y-2 text-xs">
-                            {aiPredictions.map((prediction, index) => (
-                              <div
-                                key={index}
-                                className="flex items-center space-x-2"
-                              >
-                                <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
-                                <span className="text-zinc-300">
-                                  {prediction.message}
-                                </span>
-                                <span className="text-zinc-500 text-xs">
-                                  ({Math.round(prediction.confidence * 100)}%)
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                      {/* AI Predictions list removed (we now use synthesized hints only) */}
                     </div>
                   </div>
                 </div>

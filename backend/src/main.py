@@ -526,6 +526,49 @@ async def websocket_endpoint(websocket: WebSocket):
                             }
                         ]
                         predictions = [random.choice(attack_hints)]
+
+                    # Guaranteed prediction even if model returned empty
+                    if not predictions:
+                        try:
+                            # Derive a simple hint from telemetry aggregates
+                            avg_temp = (
+                                sum(c.temperature for c in telemetry.components) / len(telemetry.components)
+                                if getattr(telemetry, 'components', None) else 0
+                            )
+                            total_util = (
+                                sum(getattr(c, 'utilization', 0) for c in telemetry.components) / max(1, len(telemetry.components))
+                                if getattr(telemetry, 'components', None) else 0
+                            )
+                            avg_latency = (
+                                sum(getattr(l, 'latency_ms', 0) for l in telemetry.links) / max(1, len(getattr(telemetry, 'links', [])))
+                                if getattr(telemetry, 'links', None) else 0
+                            )
+                            if avg_temp > 60:
+                                msg = "🔮 Thermal patterns rising"
+                                action = "Use HEAL"
+                            elif total_util > 70:
+                                msg = "🔮 Bandwidth/utilization spike predicted"
+                                action = "Use REROUTE"
+                            elif avg_latency > 2:
+                                msg = "🔮 Latency risk detected"
+                                action = "Use CUT"
+                            else:
+                                msg = "🔮 Transient errors likely"
+                                action = "Use SHIELD"
+                            predictions = [{
+                                "message": msg,
+                                "confidence": 0.51,
+                                "recommended_action": action,
+                                "time_to_failure": 5.0
+                            }]
+                        except Exception as e:
+                            logger.warning(f"Failed to create guaranteed prediction: {e}")
+                            predictions = [{
+                                "message": "🔮 System analysis suggests instability...",
+                                "confidence": 0.5,
+                                "recommended_action": "Use SHIELD",
+                                "time_to_failure": 5.0
+                            }]
                     
                     await manager.send_personal_message(
                         json.dumps({

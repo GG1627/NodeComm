@@ -40,9 +40,9 @@ class FailurePredictionML:
         # Load trained models
         self.load_models()
         
-        # Prediction thresholds
-        self.binary_threshold = 0.7  # Probability threshold for failure prediction
-        self.confidence_threshold = 0.6  # Minimum confidence for showing prediction
+        # Prediction thresholds (lowered to ensure predictions surface in real-time)
+        self.binary_threshold = 0.3  # Probability threshold for failure prediction
+        self.confidence_threshold = 0.1  # Minimum confidence for showing prediction
         
         print(f"✅ ML Predictor initialized with models from {models_dir}")
     
@@ -104,8 +104,8 @@ class FailurePredictionML:
         
         self.telemetry_history.append(current_data)
         
-        # Need at least 5 samples for trend calculation
-        if len(self.telemetry_history) < 5:
+        # Need at least 3 samples for trend calculation (reduced to speed up predictions)
+        if len(self.telemetry_history) < 3:
             return None
         
         # Current state features
@@ -117,7 +117,9 @@ class FailurePredictionML:
         ]
         
         # Calculate trend features over last 5 samples
+        # Use up to the last 5 samples, or fewer if not yet available
         recent_history = list(self.telemetry_history)[-5:]
+        k = len(recent_history)
         
         try:
             # Calculate trends (slopes)
@@ -130,13 +132,13 @@ class FailurePredictionML:
             power_values = [h['power_draw'] for h in recent_history]
             
             # Calculate linear trends
-            cpu_util_trend = np.polyfit(range(5), cpu_util_values, 1)[0]
-            cpu_temp_trend = np.polyfit(range(5), cpu_temp_values, 1)[0]
-            gpu_util_trend = np.polyfit(range(5), gpu_util_values, 1)[0]
-            gpu_temp_trend = np.polyfit(range(5), gpu_temp_values, 1)[0]
-            network_latency_trend = np.polyfit(range(5), network_latency_values, 1)[0]
-            network_util_trend = np.polyfit(range(5), network_util_values, 1)[0]
-            power_trend = np.polyfit(range(5), power_values, 1)[0]
+            cpu_util_trend = np.polyfit(range(k), cpu_util_values, 1)[0]
+            cpu_temp_trend = np.polyfit(range(k), cpu_temp_values, 1)[0]
+            gpu_util_trend = np.polyfit(range(k), gpu_util_values, 1)[0]
+            gpu_temp_trend = np.polyfit(range(k), gpu_temp_values, 1)[0]
+            network_latency_trend = np.polyfit(range(k), network_latency_values, 1)[0]
+            network_util_trend = np.polyfit(range(k), network_util_values, 1)[0]
+            power_trend = np.polyfit(range(k), power_values, 1)[0]
             
             trend_vector = [
                 cpu_util_trend, cpu_temp_trend, gpu_util_trend, gpu_temp_trend,

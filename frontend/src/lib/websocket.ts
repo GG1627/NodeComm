@@ -189,6 +189,9 @@ export class SynapseNetWebSocket {
       case "learn_mode_cv_data":
         this.notifyListeners("learn_mode_cv_data", data);
         break;
+      case "ml_predictions":
+        this.notifyListeners("ml_predictions", data);
+        break;
       case "cv_frame":
         this.notifyListeners("cv_frame", data);
         break;

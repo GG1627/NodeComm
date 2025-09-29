@@ -1,9 +1,10 @@
-# 🧠 NodeComm: Gesture-Controlled Digital Nervous System
+# 🧠 LATTICE: Gesture‑Controlled Digital Nervous System
 
 <div align="center">
 
-![NodeComm
-Learn Mode](frontend/images/img1.png)
+![Learn Mode – Main Screen](frontend/images/img1.png)
+
+<p align="center"><em>Learn Mode – Main screen to explore and interact with the system</em></p>
 
 **An interactive 3D hardware atlas where you control datacenter components with hand gestures**
 
@@ -14,21 +15,27 @@ Learn Mode](frontend/images/img1.png)
 
 </div>
 
-## 🚀 What is NodeComm
+## 🚀 What is LATTICE?
 
-?
+LATTICE makes the invisible world of datacenter interactions tangible and interactive. It's a **gesture‑controlled 3D simulation** where you manage components and links using hand movements—turning complex system behavior into an engaging, visual experience.
 
-NodeComm reimagines what it means to be connected by making the invisible world of hardware interactions tangible and interactive. It's a **gesture-controlled 3D simulation** where you manage CPU cores, GPU clusters, and network switches using hand movements - turning complex system administration into an engaging, visual experience.
+> Inspired by Astera Labs
+>
+> This project is inspired by the mission of [Astera Labs](https://www.asteralabs.com/) to enable data‑centric systems through high‑performance connectivity and platform‑level visibility. LATTICE mirrors that spirit by helping users explore how robust, low‑latency interconnects, telemetry, and adaptive responses keep modern infrastructures resilient under real‑world stress.
 
-![Chaos Mode - System Stress Testing](frontend/images/img2.png)
+![Add Chaos – System Stress Testing](frontend/images/img2.png)
+
+<p align="center"><em>Learn Mode – Inject chaos to see the system respond under stress</em></p>
 
 ### 🎮 Two Modes of Interaction
 
-**🧠 Learning Mode**: Explore a 3D hardware atlas where you can grab nodes, reroute connections, and watch real-time changes in latency, throughput, and resilience. Perfect for understanding how datacenter components communicate.
+- **🧠 Learn Mode**: Explore the topology, move nodes with computer vision, and observe live telemetry. You can also add chaos to the system (failures, overloads) to understand cause‑and‑effect.
 
-**⚡ Chaos Mode**: Survive 60 seconds against an AI adversary that injects CPU overloads, network floods, and component failures. Use gestures to fight back and keep your system alive!
+- **⚔️ Play Mode**: Play against an AI adversary. Configure your match, then defend in real‑time using gestures (heal, reroute, shield, cut).
 
-![Node Movement with Computer Vision](frontend/images/img3.png)
+![Move Nodes with Computer Vision](frontend/images/img3.png)
+
+<p align="center"><em>Learn Mode – Move nodes with CV; see latency/utilization update in real time</em></p>
 
 ## ✨ Key Features
 
@@ -65,16 +72,17 @@ NodeComm reimagines what it means to be connected by making the invisible world 
 - **Cascading failure** sequences
 - **Dynamic difficulty** adjustment
 
-### 🧠 **Machine Learning Failure Prediction**
+### 🧠 **Machine Learning Failure Prediction (optional)**
 
-- **1,000,000 training samples** from real hardware telemetry
-- **97% accuracy** in predicting failures before they occur
-- **99.8% accuracy** in classifying failure types
-- **87.1% cross-validation score** confirming no overfitting
-- **Random Forest classifier** from scikit-learn
-- **Real-time anomaly detection** with ML-powered insights
+- Built‑in models trained on **1,000,000 samples** of hardware telemetry
+- Up to **97% accuracy** for early failure prediction on evaluation datasets
+- **Random Forest** classifiers via scikit‑learn
+- Real‑time anomaly detection APIs available in the backend
+- ML predictions used to supply hints to users in Play Mode
 
-![Game Mode Main Screen](frontend/images/img4.png)
+![Play Mode – Configuration Screen](frontend/images/img4.png)
+
+<p align="center"><em>Play Mode – Configure your game before facing the AI</em></p>
 
 ## 🏗️ Technical Architecture
 
@@ -142,7 +150,9 @@ Hardware Telemetry → Feature Engineering → Random Forest → Failure Predict
 - AI behavior analysis
 - Human-computer interaction studies
 
-![Playing Against AI Adversary](frontend/images/img5.png)
+![Playing Against AI Adversary – Main Screen](frontend/images/img5.png)
+
+<p align="center"><em>Play Mode – Main screen while defending against the AI adversary</em></p>
 
 ## 🚀 Quick Start
 
@@ -224,6 +234,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
+- Inspired by Astera Labs and their focus on unlocking system‑level performance through intelligent connectivity and observability.
 - **MediaPipe** for computer vision capabilities
 - **Three.js** for 3D rendering
 - **FastAPI** for backend architecture
