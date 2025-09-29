@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: synapsenet-backend
+    name: lattice-backend
     env: docker
     plan: free
     autoDeploy: true
@@ -12,7 +12,7 @@ services:
         sync: false
 
   - type: web
-    name: synapsenet-frontend
+    name: lattice-frontend
     env: docker
     plan: free
     autoDeploy: true
