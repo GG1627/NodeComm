@@ -2,6 +2,12 @@
 
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { synapseNetWS, SystemUpdate } from "../lib/websocket";
+import localFont from "next/font/local";
+
+const drukMedium = localFont({
+  src: "./fonts/Druk-Medium-Trial.woff",
+  display: "swap",
+});
 
 // Game mode gesture detection - matches backend gesture_recognition.py exactly
 function detectGameGesture(hands: Array<any>): {
@@ -208,6 +214,8 @@ export default function Home() {
   const [playerScore, setPlayerScore] = useState(0);
   const [aiScore, setAiScore] = useState(0);
   const [autoPredictionsActive, setAutoPredictionsActive] = useState(false);
+  const [latencyHistory, setLatencyHistory] = useState<number[]>([]);
+  const [particlesEnabled, setParticlesEnabled] = useState(true);
 
   // Simplified game topology (static for arcade mode)
   const gameTopology = useMemo(
@@ -766,9 +774,9 @@ export default function Home() {
     }
   }, [cameraStream]);
 
-  // Start frame capture when on game screen with CV enabled
+  // Start frame capture when CV is enabled (both learn and game modes)
   useEffect(() => {
-    console.log("🎬 Game screen frame capture check:", {
+    console.log("🎬 Frame capture check:", {
       currentMode,
       gameState,
       cvEnabled,
@@ -777,18 +785,35 @@ export default function Home() {
       hasCanvasRef: !!canvasRef.current,
     });
 
-    if (
-      currentMode === "game" &&
-      cvEnabled &&
-      cameraStream &&
-      videoRef.current &&
-      canvasRef.current
-    ) {
-      console.log("🎬 Starting frame capture on game screen");
+    if (cvEnabled && cameraStream && videoRef.current && canvasRef.current) {
+      console.log(
+        `🎬 Starting frame capture (mode: ${currentMode}, state: ${gameState})`
+      );
       const cleanup = startFrameCapture();
       return cleanup;
     }
   }, [currentMode, gameState, cvEnabled, cameraStream]);
+
+  // Maintain lightweight latency history for sparkline (Learn Mode)
+  useEffect(() => {
+    if (currentMode !== "learn") return;
+    const interval = setInterval(() => {
+      const metrics = calculateTopologyHealth();
+      const next = [...latencyHistory, parseFloat(metrics.avgLatency)].slice(
+        -30
+      );
+      setLatencyHistory(next);
+    }, 1000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMode, nodePositions]);
+
+  // Pause particles when tab hidden for a sleeker/professional feel and performance
+  useEffect(() => {
+    const onVis = () => setParticlesEnabled(!document.hidden);
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
   // Game timer
   useEffect(() => {
@@ -1825,6 +1850,30 @@ export default function Home() {
 
   return (
     <div className="h-screen overflow-hidden bg-zinc-950 text-white">
+      {/* Ambient gradient glow background */}
+      <div className="pointer-events-none fixed inset-0 -z-10">
+        <div
+          className="absolute -top-40 -left-32 h-80 w-80 rounded-full blur-3xl opacity-20"
+          style={{
+            background:
+              "radial-gradient(closest-side, rgba(59,130,246,0.6), rgba(59,130,246,0))",
+          }}
+        />
+        <div
+          className="absolute -bottom-32 right-0 h-96 w-96 rounded-full blur-3xl opacity-15"
+          style={{
+            background:
+              "radial-gradient(closest-side, rgba(34,197,94,0.5), rgba(34,197,94,0))",
+          }}
+        />
+        <div
+          className="absolute top-1/3 left-1/2 -translate-x-1/2 h-72 w-[28rem] rounded-full blur-3xl opacity-10"
+          style={{
+            background:
+              "radial-gradient(closest-side, rgba(14,165,233,0.5), rgba(14,165,233,0))",
+          }}
+        />
+      </div>
       {/* Finger Position Overlay - Shows mapped finger positions on screen */}
       {cvEnabled && smoothedPositions.length > 0 && (
         <div className="fixed inset-0 pointer-events-none z-50">
@@ -1879,14 +1928,6 @@ export default function Home() {
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Grabbed Node Indicator */}
-      {grabbedNode && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500/90 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50 animate-pulse">
-          🤏 Grabbing: {grabbedNode.replace("node-", "").toUpperCase()} - Move
-          to reposition
         </div>
       )}
 
@@ -2026,15 +2067,43 @@ export default function Home() {
       )}
 
       {/* Header */}
-      <header className="bg-zinc-900/50 backdrop-blur-sm border-b border-zinc-800/50 p-6">
+      <header className="bg-zinc-900/50 backdrop-blur-sm border-b border-zinc-800/50 px-6 py-3 relative">
+        {/* Header underline gradient accent */}
+        <div
+          className="pointer-events-none absolute inset-x-0 -bottom-[1px] h-[1px]"
+          style={{
+            background:
+              "linear-gradient(90deg, rgba(34,197,94,0), rgba(34,197,94,0.4), rgba(34,197,94,0))",
+          }}
+        />
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-light tracking-wide text-white font-bold">
-            NodeComm
-          </h1>
+          <div className="flex items-center gap-3">
+            <img
+              src="/Logo.avif"
+              alt="Lattice Logo"
+              className="h-11 w-11 object-contain select-none"
+              draggable={false}
+            />
+            <h1
+              className={`${drukMedium.className} text-4xl tracking-wide italic inline-block origin-left scale-x-[2.08] bg-clip-text text-transparent`}
+              style={{
+                backgroundImage:
+                  "linear-gradient(90deg, #71d4f3, #38bdf8 60%, #71d4f3)",
+              }}
+            >
+              <span className="text-[#ffffff]">L</span>
+              <span className="text-[#ffffff]">A</span>
+              <span className="text-[#ffffff]">T</span>
+              <span className="text-[#ffffff]">T</span>
+              <span className="text-[#54cec7]">I</span>
+              <span className="text-[#ffffff]">C</span>
+              <span className="text-[#ffffff]">E</span>
+            </h1>
+          </div>
           <div className="flex items-center space-x-8">
             <div className="text-sm font-medium">
               <span className="text-zinc-400">Resilience</span>
-              <span className="text-emerald-400 font-semibold ml-3">
+              <span className="font-semibold ml-3 bg-gradient-to-r from-emerald-400 to-cyan-300 bg-clip-text text-transparent">
                 {Math.round(resilience)}%
               </span>
             </div>
@@ -2127,7 +2196,7 @@ export default function Home() {
                   <button
                     onClick={handleStartSimulation}
                     disabled={!isOnline}
-                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-xs rounded-md transition-colors cursor-pointer"
+                    className="px-3 py-1.5 text-xs rounded-lg cursor-pointer select-none bg-gradient-to-b from-emerald-600 to-emerald-500 text-white border border-emerald-400/30 shadow-[0_4px_12px_rgba(16,185,129,0.25)] hover:shadow-[0_6px_16px_rgba(16,185,129,0.35)] hover:from-emerald-500 hover:to-emerald-400 transition-all disabled:bg-gray-600 disabled:to-gray-600 disabled:border-gray-500/30 disabled:shadow-none disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
                   >
                     Start Sim
                   </button>
@@ -2135,7 +2204,7 @@ export default function Home() {
                   <button
                     onClick={handleStopSimulation}
                     disabled={!isOnline}
-                    className="px-3 py-1 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-xs rounded-md transition-colors cursor-pointer"
+                    className="px-3 py-1.5 text-xs rounded-lg cursor-pointer select-none bg-gradient-to-b from-zinc-600 to-zinc-500 text-white border border-zinc-400/20 shadow-[0_3px_10px_rgba(0,0,0,0.25)] hover:from-zinc-500 hover:to-zinc-400 hover:shadow-[0_5px_14px_rgba(0,0,0,0.3)] transition-all disabled:bg-gray-600 disabled:border-gray-500/30 disabled:shadow-none disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-zinc-300/30"
                   >
                     Stop Sim
                   </button>
@@ -2143,13 +2212,11 @@ export default function Home() {
                 <button
                   onClick={handleInjectChaos}
                   disabled={!isOnline || !simulationRunning}
-                  className={`px-3 py-1 text-white text-xs rounded-md transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 text-xs rounded-lg cursor-pointer select-none text-white transition-colors focus:outline-none ${
                     chaosInjected
-                      ? "bg-orange-600 hover:bg-orange-700"
-                      : currentMode === "learn"
-                      ? "bg-red-600 hover:bg-red-700 animate-pulse"
-                      : "bg-red-600 hover:bg-red-700"
-                  } disabled:bg-gray-600 disabled:cursor-not-allowed`}
+                      ? "bg-orange-600 hover:bg-orange-500 border border-orange-500/25 shadow-[0_2px_8px_rgba(234,88,12,0.25)] focus:ring-2 focus:ring-orange-400/30"
+                      : "bg-red-600 hover:bg-red-500 border border-red-500/25 shadow-[0_2px_8px_rgba(239,68,68,0.25)] focus:ring-2 focus:ring-red-400/30"
+                  } disabled:bg-gray-600 disabled:border-gray-500/30 disabled:shadow-none disabled:text-gray-300 disabled:cursor-not-allowed`}
                   title={
                     currentMode === "learn"
                       ? "Click to simulate system failures and watch AI self-healing in action!"
@@ -2199,12 +2266,12 @@ export default function Home() {
 
               {/* Gesture Controls */}
               <div className="grid grid-cols-4 gap-3 text-center text-xs">
-                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30 shadow-[0_2px_12px_rgba(0,0,0,0.25)]">
                   <div className="text-lg mb-1">✂️</div>
                   <div className="text-white font-medium text-xs">CUT</div>
                   <div className="text-zinc-400 text-xs">Scissors</div>
                 </div>
-                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30 shadow-[0_2px_12px_rgba(0,0,0,0.25)]">
                   <div className="text-lg mb-1">✊</div>
                   <div className="text-white font-medium text-xs">HEAL</div>
                   <div className="text-zinc-400 text-xs">Fist</div>
@@ -2556,11 +2623,12 @@ export default function Home() {
                       Inject Chaos
                     </div>
                   </div>
-                  <div className="text-zinc-400 text-xs">
-                    Simulate system failures and watch AI self-healing
+                  <div className="text-zinc-300 text-xs">
+                    Simulate failures to stress-test communication, routing, and
+                    resilience.
                   </div>
                 </div>
-                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30 shadow-[0_2px_12px_rgba(0,0,0,0.25)]">
                   <div className="flex items-center space-x-2 mb-1">
                     <div className="text-lg">📊</div>
                     <div className="text-white font-medium text-xs">
@@ -2571,7 +2639,7 @@ export default function Home() {
                     Observe real-time performance in the sidebar
                   </div>
                 </div>
-                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                <div className="bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30 shadow-[0_2px_12px_rgba(0,0,0,0.25)]">
                   <div className="flex items-center space-x-2 mb-1">
                     <div className="text-lg">🤖</div>
                     <div className="text-white font-medium text-xs">
@@ -2582,7 +2650,7 @@ export default function Home() {
                     Watch intelligent system recovery in action
                   </div>
                 </div>
-                <div className="relative bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30">
+                <div className="relative bg-zinc-800/40 backdrop-blur-sm rounded-xl p-3 border border-zinc-700/30 shadow-[0_2px_12px_rgba(0,0,0,0.25)]">
                   <div className="flex items-center space-x-2 mb-2">
                     <div className="text-lg">🖐️</div>
                     <div className="text-white font-medium text-xs">
@@ -2593,17 +2661,18 @@ export default function Home() {
                     Point at nodes • Press SPACE to grab • Move finger to drag •
                     Press SPACE to release
                   </div>
+
                   <button
                     onClick={
                       cvEnabled ? disableComputerVision : enableComputerVision
                     }
                     disabled={cvLoading}
-                    className={`w-full px-3 py-1 text-xs rounded-lg font-medium transition-colors ${
+                    className={`w-full px-3 py-1.5 text-xs rounded-lg font-medium select-none transition-all focus:outline-none ${
                       cvLoading
                         ? "bg-gray-600 text-gray-300 cursor-not-allowed"
                         : cvEnabled
-                        ? "bg-red-600 hover:bg-red-700 text-white"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                        ? "bg-gradient-to-b from-red-600 to-red-500 text-white border border-red-400/30 shadow-[0_4px_12px_rgba(239,68,68,0.25)] hover:from-red-500 hover:to-red-400 focus:ring-2 focus:ring-red-400/40"
+                        : "bg-gradient-to-b from-blue-600 to-blue-500 text-white border border-blue-400/30 shadow-[0_4px_12px_rgba(59,130,246,0.25)] hover:from-blue-500 hover:to-blue-400 focus:ring-2 focus:ring-blue-400/40"
                     }`}
                   >
                     {cvLoading
@@ -2631,7 +2700,14 @@ export default function Home() {
               </div>
 
               {/* Real-time Topology Metrics */}
-              <div className="absolute top-15 left-4 bg-zinc-900/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-zinc-700/50 w-[190px]">
+              <div className="absolute top-15 left-4 bg-zinc-900/80 backdrop-blur-sm rounded-lg px-3 py-2 border border-zinc-700/50 w-[190px] shadow-[0_4px_20px_rgba(0,0,0,0.35)] relative">
+                <div
+                  className="pointer-events-none absolute inset-x-0 -top-[1px] h-[1px]"
+                  style={{
+                    background:
+                      "linear-gradient(90deg, rgba(56,189,248,0), rgba(56,189,248,0.6), rgba(56,189,248,0))",
+                  }}
+                />
                 <div className="flex items-center gap-2 mb-3">
                   <div className="w-2 h-2 bg-cyan-500 rounded-full animate-pulse"></div>
                   <span className="text-sm font-semibold text-zinc-200">
@@ -2639,18 +2715,25 @@ export default function Home() {
                   </span>
                 </div>
 
+                {currentMode === "learn" && isInDragSession && (
+                  <div className="mb-2 p-2 rounded-md bg-blue-900/60 border border-blue-400/60 text-[11px] text-blue-100 shadow-[0_0_15px_rgba(59,130,246,0.6)]">
+                    💡 Notice changes here while dragging: Avg Latency and
+                    Health update live.
+                  </div>
+                )}
+
                 {(() => {
                   const metrics = calculateTopologyHealth();
                   const impact = calculateMovementImpact();
 
                   return (
                     <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-xs text-zinc-300">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-zinc-400">
                           Avg Latency:
                         </span>
                         <span
-                          className={`text-xs font-mono ${
+                          className={`text-xs font-mono tabular-nums ${
                             parseFloat(metrics.avgLatency) > 2
                               ? "text-red-400"
                               : parseFloat(metrics.avgLatency) > 1
@@ -2661,12 +2744,12 @@ export default function Home() {
                           {metrics.avgLatency}ms
                         </span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-xs text-zinc-300">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs text-zinc-400">
                           Health Score:
                         </span>
                         <span
-                          className={`text-xs font-mono ${
+                          className={`text-xs font-mono tabular-nums ${
                             parseFloat(metrics.healthScore) > 80
                               ? "text-green-400"
                               : parseFloat(metrics.healthScore) > 60
@@ -2685,6 +2768,30 @@ export default function Home() {
                           {metrics.totalConnections}
                         </span>
                       </div>
+
+                      {/* Latency Sparkline */}
+                      {latencyHistory.length > 1 && (
+                        <svg viewBox="0 0 100 24" className="w-full h-6 mt-2">
+                          <polyline
+                            fill="none"
+                            stroke="rgba(34,211,238,0.7)"
+                            strokeWidth="1.5"
+                            points={(() => {
+                              const vals = latencyHistory;
+                              const min = Math.min(...vals);
+                              const max = Math.max(...vals);
+                              const range = Math.max(0.001, max - min);
+                              return vals
+                                .map((v, i) => {
+                                  const x = (i / (vals.length - 1)) * 100;
+                                  const y = 24 - ((v - min) / range) * 24;
+                                  return `${x},${y}`;
+                                })
+                                .join(" ");
+                            })()}
+                          />
+                        </svg>
+                      )}
 
                       {/* Before/After Comparison */}
                       {impact && (
@@ -3038,10 +3145,10 @@ export default function Home() {
                       x={nodePositions["node-1"].x - 80}
                       y={nodePositions["node-1"].y - 80}
                       width="160"
-                      height="120"
+                      height="170"
                       className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
                     >
-                      <div className="bg-zinc-800/95 backdrop-blur-sm rounded-lg p-3 border border-zinc-600/50 text-xs text-white shadow-xl">
+                      <div className="relative z-[999] bg-zinc-800/95 backdrop-blur-sm rounded-lg p-3 border border-zinc-600/50 text-xs text-white shadow-xl">
                         <div className="font-medium text-emerald-400">
                           Intel Xeon Platinum 8480+
                         </div>
@@ -3179,7 +3286,7 @@ export default function Home() {
                       x={nodePositions["node-3"].x - 80}
                       y={nodePositions["node-3"].y - 80}
                       width="160"
-                      height="100"
+                      height="140"
                       className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
                     >
                       <div className="bg-zinc-800/95 backdrop-blur-sm rounded-lg p-3 border border-zinc-600/50 text-xs text-white shadow-xl">
@@ -3464,7 +3571,7 @@ export default function Home() {
                       x={nodePositions["node-2"].x - 80}
                       y={nodePositions["node-2"].y - 80}
                       width="160"
-                      height="100"
+                      height="140"
                       className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
                     >
                       <div className="bg-zinc-800/95 backdrop-blur-sm rounded-lg p-3 border border-zinc-600/50 text-xs text-white shadow-xl">
@@ -3511,7 +3618,7 @@ export default function Home() {
                       x="170"
                       y="270"
                       width="160"
-                      height="100"
+                      height="140"
                       className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
                     >
                       <div className="bg-zinc-800/95 backdrop-blur-sm rounded-lg p-3 border border-zinc-600/50 text-xs text-white shadow-xl">
@@ -3558,7 +3665,7 @@ export default function Home() {
                       x="470"
                       y="270"
                       width="160"
-                      height="100"
+                      height="140"
                       className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
                     >
                       <div className="bg-zinc-800/95 backdrop-blur-sm rounded-lg p-3 border border-zinc-600/50 text-xs text-white shadow-xl">
@@ -3605,7 +3712,7 @@ export default function Home() {
                       x="570"
                       y="270"
                       width="160"
-                      height="100"
+                      height="140"
                       className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
                     >
                       <div className="bg-zinc-800/95 backdrop-blur-sm rounded-lg p-3 border border-zinc-600/50 text-xs text-white shadow-xl">
@@ -3864,52 +3971,226 @@ export default function Home() {
                   </g>
                 </g>
 
-                {/* Data Flow Particles */}
-                <g className="opacity-70">
-                  <circle
-                    r="2"
-                    fill="rgb(52 211 153)"
-                    className="animate-pulse"
-                  >
-                    <animateMotion
-                      dur="3s"
-                      repeatCount="indefinite"
-                      path="M150,100 L400,250"
-                    />
-                  </circle>
-                  <circle
-                    r="2"
-                    fill="rgb(59 130 246)"
-                    className="animate-pulse"
-                  >
-                    <animateMotion
-                      dur="4s"
-                      repeatCount="indefinite"
-                      path="M400,250 L550,350"
-                    />
-                  </circle>
-                  <circle
-                    r="2"
-                    fill="rgb(168 85 247)"
-                    className="animate-pulse"
-                  >
-                    <animateMotion
-                      dur="2.5s"
-                      repeatCount="indefinite"
-                      path="M550,350 L550,450"
-                    />
-                  </circle>
-                  <circle
-                    r="2"
-                    fill="rgb(245 158 11)"
-                    className="animate-pulse"
-                  >
-                    <animateMotion
-                      dur="3.5s"
-                      repeatCount="indefinite"
-                      path="M650,100 L650,450"
-                    />
-                  </circle>
+                {/* Data Flow Particles - follow live connections */}
+                <defs>
+                  <path
+                    id="p_cpu1_fabric"
+                    d={`M ${getNodePosition("node-1").x},${
+                      getNodePosition("node-1").y
+                    } L ${getNodePosition("node-4").x},${
+                      getNodePosition("node-4").y
+                    }`}
+                  />
+                  <path
+                    id="p_cpu2_fabric"
+                    d={`M ${getNodePosition("node-3").x},${
+                      getNodePosition("node-3").y
+                    } L ${getNodePosition("node-4").x},${
+                      getNodePosition("node-4").y
+                    }`}
+                  />
+                  <path
+                    id="p_fabric_gpu1"
+                    d={`M ${getNodePosition("node-4").x},${
+                      getNodePosition("node-4").y
+                    } L ${getNodePosition("node-2").x},${
+                      getNodePosition("node-2").y
+                    }`}
+                  />
+                  <path
+                    id="p_fabric_gpu3"
+                    d={`M ${getNodePosition("node-4").x},${
+                      getNodePosition("node-4").y
+                    } L ${getNodePosition("node-8").x},${
+                      getNodePosition("node-8").y
+                    }`}
+                  />
+                  <path
+                    id="p_gpu1_ssd1"
+                    d={`M ${getNodePosition("node-2").x},${
+                      getNodePosition("node-2").y
+                    } L ${getNodePosition("node-10").x},${
+                      getNodePosition("node-10").y
+                    }`}
+                  />
+                  <path
+                    id="p_nic1_fabric"
+                    d={`M ${getNodePosition("node-16").x},${
+                      getNodePosition("node-16").y
+                    } L ${getNodePosition("node-4").x},${
+                      getNodePosition("node-4").y
+                    }`}
+                  />
+                  <path
+                    id="p_nic2_fabric"
+                    d={`M ${getNodePosition("node-17").x},${
+                      getNodePosition("node-17").y
+                    } L ${getNodePosition("node-4").x},${
+                      getNodePosition("node-4").y
+                    }`}
+                  />
+                  <path
+                    id="p_cpu1_mem1"
+                    d={`M ${getNodePosition("node-1").x},${
+                      getNodePosition("node-1").y
+                    } L ${getNodePosition("node-14").x},${
+                      getNodePosition("node-14").y
+                    }`}
+                  />
+                  <path
+                    id="p_cpu2_mem2"
+                    d={`M ${getNodePosition("node-3").x},${
+                      getNodePosition("node-3").y
+                    } L ${getNodePosition("node-15").x},${
+                      getNodePosition("node-15").y
+                    }`}
+                  />
+                </defs>
+                <g className={`opacity-60 ${particlesEnabled ? "" : "hidden"}`}>
+                  {/* particles along CPU <-> Fabric */}
+                  {["p_cpu1_fabric", "p_cpu2_fabric"].map((pid, i) => (
+                    <g key={pid + i}>
+                      <circle
+                        r="2"
+                        fill="rgb(52 211 153)"
+                        style={{ filter: "blur(0.5px)" }}
+                      >
+                        <animateMotion
+                          dur={`${2.2 + i * 0.6}s`}
+                          repeatCount="indefinite"
+                          begin={`${i * 0.4}s`}
+                        >
+                          <mpath href={`#${pid}`} />
+                        </animateMotion>
+                      </circle>
+                      <circle
+                        r="2"
+                        fill="rgb(16 185 129)"
+                        style={{ opacity: 0.7, filter: "blur(0.5px)" }}
+                      >
+                        <animateMotion
+                          dur={`${3 + i * 0.7}s`}
+                          repeatCount="indefinite"
+                          begin={`${0.8 + i * 0.5}s`}
+                        >
+                          <mpath href={`#${pid}`} />
+                        </animateMotion>
+                      </circle>
+                    </g>
+                  ))}
+
+                  {/* particles along Fabric -> GPUs */}
+                  {["p_fabric_gpu1", "p_fabric_gpu3"].map((pid, i) => (
+                    <g key={pid + i}>
+                      <circle
+                        r="2"
+                        fill="rgb(168 85 247)"
+                        style={{ opacity: 0.75, filter: "blur(0.5px)" }}
+                      >
+                        <animateMotion
+                          dur={`${2.5 + i * 0.5}s`}
+                          repeatCount="indefinite"
+                          begin={`${i * 0.3}s`}
+                        >
+                          <mpath href={`#${pid}`} />
+                        </animateMotion>
+                      </circle>
+                      <circle
+                        r="2"
+                        fill="rgb(126 34 206)"
+                        style={{ opacity: 0.65, filter: "blur(0.6px)" }}
+                      >
+                        <animateMotion
+                          dur={`${3.2 + i * 0.4}s`}
+                          repeatCount="indefinite"
+                          begin={`${0.6 + i * 0.4}s`}
+                        >
+                          <mpath href={`#${pid}`} />
+                        </animateMotion>
+                      </circle>
+                    </g>
+                  ))}
+
+                  {/* particles along GPU -> Storage */}
+                  <g>
+                    <circle
+                      r="2"
+                      fill="rgb(245 158 11)"
+                      style={{ opacity: 0.7, filter: "blur(0.4px)" }}
+                    >
+                      <animateMotion
+                        dur="3.2s"
+                        repeatCount="indefinite"
+                        begin="0s"
+                      >
+                        <mpath href="#p_gpu1_ssd1" />
+                      </animateMotion>
+                    </circle>
+                    <circle
+                      r="2"
+                      fill="rgb(234 179 8)"
+                      style={{ opacity: 0.6, filter: "blur(0.4px)" }}
+                    >
+                      <animateMotion
+                        dur="2.8s"
+                        repeatCount="indefinite"
+                        begin="0.9s"
+                      >
+                        <mpath href="#p_gpu1_ssd1" />
+                      </animateMotion>
+                    </circle>
+                  </g>
+
+                  {/* particles along NICs -> Fabric */}
+                  {["p_nic1_fabric", "p_nic2_fabric"].map((pid, i) => (
+                    <g key={pid + i}>
+                      <circle
+                        r="2"
+                        fill="rgb(59 130 246)"
+                        style={{ opacity: 0.7, filter: "blur(0.5px)" }}
+                      >
+                        <animateMotion
+                          dur={`${2.8 + i * 0.4}s`}
+                          repeatCount="indefinite"
+                          begin={`${i * 0.2}s`}
+                        >
+                          <mpath href={`#${pid}`} />
+                        </animateMotion>
+                      </circle>
+                      <circle
+                        r="2"
+                        fill="rgb(96 165 250)"
+                        style={{ opacity: 0.6, filter: "blur(0.6px)" }}
+                      >
+                        <animateMotion
+                          dur={`${3.6 + i * 0.5}s`}
+                          repeatCount="indefinite"
+                          begin={`${0.7 + i * 0.3}s`}
+                        >
+                          <mpath href={`#${pid}`} />
+                        </animateMotion>
+                      </circle>
+                    </g>
+                  ))}
+
+                  {/* particles along CPU -> Memory */}
+                  {["p_cpu1_mem1", "p_cpu2_mem2"].map((pid, i) => (
+                    <g key={pid + i}>
+                      <circle
+                        r="2"
+                        fill="rgb(34 197 94)"
+                        style={{ opacity: 0.7, filter: "blur(0.4px)" }}
+                      >
+                        <animateMotion
+                          dur={`${2.4 + i * 0.4}s`}
+                          repeatCount="indefinite"
+                          begin={`${i * 0.3}s`}
+                        >
+                          <mpath href={`#${pid}`} />
+                        </animateMotion>
+                      </circle>
+                    </g>
+                  ))}
                 </g>
               </svg>
 
