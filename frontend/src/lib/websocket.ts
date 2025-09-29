@@ -101,7 +101,14 @@ export class SynapseNetWebSocket {
     try {
       const res = await fetch("/api/runtime", { cache: "no-store" });
       if (res.ok) {
-        const data = (await res.json()) as { backendHttpUrl?: string };
+        const data = (await res.json()) as {
+          backendHttpUrl?: string;
+          wsUrl?: string;
+        };
+        if (data?.wsUrl) {
+          this.url = data.wsUrl;
+          return;
+        }
         if (data?.backendHttpUrl) {
           const u = new URL(data.backendHttpUrl);
           const scheme = u.protocol === "https:" ? "wss:" : "ws:";
