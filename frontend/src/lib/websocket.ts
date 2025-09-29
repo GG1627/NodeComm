@@ -85,7 +85,11 @@ export class SynapseNetWebSocket {
     | "disconnected"
     | "error" = "disconnected";
 
-  constructor(private url: string = "ws://localhost:8000/ws") {
+  constructor(
+    private url: string = (typeof process !== "undefined" &&
+      process.env.NEXT_PUBLIC_WS_URL) ||
+      "ws://localhost:8000/ws"
+  ) {
     this.connect();
   }
 
