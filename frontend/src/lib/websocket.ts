@@ -85,29 +85,44 @@ export class SynapseNetWebSocket {
     | "disconnected"
     | "error" = "disconnected";
 
-  constructor(
-    private url: string = (() => {
-      const explicitWs =
-        typeof process !== "undefined" && process.env.NEXT_PUBLIC_WS_URL
-          ? process.env.NEXT_PUBLIC_WS_URL
-          : undefined;
-      if (explicitWs) return explicitWs;
-      const backendHttp =
-        typeof process !== "undefined" &&
-        process.env.NEXT_PUBLIC_BACKEND_HTTP_URL
-          ? process.env.NEXT_PUBLIC_BACKEND_HTTP_URL
-          : undefined;
-      if (backendHttp) {
-        try {
-          const u = new URL(backendHttp);
+  constructor(private url: string = "") {
+    this.resolveUrl().then(() => this.connect());
+  }
+
+  private async resolveUrl() {
+    const explicitWs =
+      typeof process !== "undefined" && process.env.NEXT_PUBLIC_WS_URL
+        ? process.env.NEXT_PUBLIC_WS_URL
+        : undefined;
+    if (explicitWs) {
+      this.url = explicitWs;
+      return;
+    }
+    try {
+      const res = await fetch("/api/runtime", { cache: "no-store" });
+      if (res.ok) {
+        const data = (await res.json()) as { backendHttpUrl?: string };
+        if (data?.backendHttpUrl) {
+          const u = new URL(data.backendHttpUrl);
           const scheme = u.protocol === "https:" ? "wss:" : "ws:";
-          return `${scheme}//${u.host}/ws`;
-        } catch {}
+          this.url = `${scheme}//${u.host}/ws`;
+          return;
+        }
       }
-      return "ws://localhost:8000/ws";
-    })()
-  ) {
-    this.connect();
+    } catch {}
+    const backendHttp =
+      typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_HTTP_URL
+        ? process.env.NEXT_PUBLIC_BACKEND_HTTP_URL
+        : undefined;
+    if (backendHttp) {
+      try {
+        const u = new URL(backendHttp);
+        const scheme = u.protocol === "https:" ? "wss:" : "ws:";
+        this.url = `${scheme}//${u.host}/ws`;
+        return;
+      } catch {}
+    }
+    this.url = "ws://localhost:8000/ws";
   }
 
   private connect() {
