@@ -86,9 +86,26 @@ export class SynapseNetWebSocket {
     | "error" = "disconnected";
 
   constructor(
-    private url: string = (typeof process !== "undefined" &&
-      process.env.NEXT_PUBLIC_WS_URL) ||
-      "ws://localhost:8000/ws"
+    private url: string = (() => {
+      const explicitWs =
+        typeof process !== "undefined" && process.env.NEXT_PUBLIC_WS_URL
+          ? process.env.NEXT_PUBLIC_WS_URL
+          : undefined;
+      if (explicitWs) return explicitWs;
+      const backendHttp =
+        typeof process !== "undefined" &&
+        process.env.NEXT_PUBLIC_BACKEND_HTTP_URL
+          ? process.env.NEXT_PUBLIC_BACKEND_HTTP_URL
+          : undefined;
+      if (backendHttp) {
+        try {
+          const u = new URL(backendHttp);
+          const scheme = u.protocol === "https:" ? "wss:" : "ws:";
+          return `${scheme}//${u.host}/ws`;
+        } catch {}
+      }
+      return "ws://localhost:8000/ws";
+    })()
   ) {
     this.connect();
   }
